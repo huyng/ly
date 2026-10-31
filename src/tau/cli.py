@@ -313,7 +313,13 @@ class Repl:
             parts = [self.session.provider.model, format_duration(elapsed)]
             if elapsed and output_tokens:
                 parts.append(f"{output_tokens / elapsed:.0f} tok/s")
+            # The cumulative `in` below cannot say how close the next request is
+            # to the compaction threshold; this is the number that does.
+            context = f"ctx {self.session.context_tokens:,}"
+            if self.session.compaction.enabled:
+                context += f" / {self.session.compaction.threshold_tokens:,}"
             parts += [
+                context,
                 f"{usage.input:,} in",
                 f"{usage.output:,} out",
             ]

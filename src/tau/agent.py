@@ -204,7 +204,8 @@ class AgentSession:
 
     # -- compaction ------------------------------------------------------------
 
-    def _context_tokens(self) -> int:
+    @property
+    def context_tokens(self) -> int:
         """Size of the next request in tokens, as far as we can tell.
 
         The provider reports the real prompt size (`usage.input`) for the last
@@ -226,7 +227,7 @@ class AgentSession:
         """Compact before a turn if the branch is over the token threshold."""
         if not self.compaction.enabled or self._compaction_blocked:
             return False
-        tokens = self._context_tokens()
+        tokens = self.context_tokens
         if tokens < self.compaction.threshold_tokens:
             return False
         return self.compact(tokens)

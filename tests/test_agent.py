@@ -21,7 +21,7 @@ from tau.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from tau.provider import ProviderError
+from tau.providers import ProviderError
 from tau.session import SessionManager
 from tau.tools import Tool, ToolResult
 from tau.tools.task import TaskTool
@@ -273,6 +273,48 @@ def test_abort_prevents_tool_execution(tmp_path):
     last = session.messages[-1]
     assert isinstance(last, ToolResultMessage)
     assert (last.tool_call_id, last.is_error) == ("c1", True)
+
+
+def test_aborted_tool_stream_answers_every_call_before_next_prompt(tmp_path):
+    turn = AssistantMessage(
+        content=[
+            ToolCall(id="c1", name="echo", arguments={"text": "never run"}),
+            ToolCall(id="c2", name="echo", arguments={"_raw": '{"text":'}),
+        ],
+        model="fake-model",
+        provider="fake",
+        stop_reason="aborted",
+    )
+    reply = AssistantMessage(
+        content=[TextContent(text="resumed")], model="fake-model", provider="fake"
+    )
+    provider = FakeProvider([turn, reply])
+    tool = EchoTool()
+    session = AgentSession(
+        provider=provider,
+        tools=[tool],
+        session_manager=SessionManager(in_memory=True),
+        system_prompt="test system prompt",
+        cwd=str(tmp_path),
+    )
+    events = []
+    session.subscribe(events.append)
+
+    assert session.prompt("interrupt the stream") is turn
+    assert tool.calls == []
+    results = [m for m in session.messages if isinstance(m, ToolResultMessage)]
+    assert [r.tool_call_id for r in results] == ["c1", "c2"]
+    assert all(r.is_error and "aborted" in r.output for r in results)
+    assert isinstance(events[-1], AgentEndEvent)
+    assert events[-1].aborted
+
+    history = session.messages
+    assert session.prompt("continue") is reply
+    request_messages = provider.requests[1][1]
+    assert request_messages[:-1] == history
+    assert isinstance(request_messages[-1], UserMessage)
+    assert request_messages[-1].content == "continue"
+    assert tool.calls == []
 
 
 def test_interrupt_inside_a_tool_answers_every_call(tmp_path):

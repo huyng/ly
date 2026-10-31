@@ -30,7 +30,7 @@ from .events import (
     ToolNameEvent,
 )
 from .prompts import build_system_prompt, context_files
-from .provider import MissingCredentialsError, OpenAIProvider
+from .providers import MissingCredentialsError, make_provider
 from .render import (
     GutterWriter,
     MarkdownRenderer,
@@ -59,7 +59,9 @@ HELP = """\
 
 
 def make_session(args: argparse.Namespace) -> AgentSession:
-    provider = OpenAIProvider(model=args.model, base_url=args.base_url, api_key=args.api_key)
+    provider = make_provider(
+        api=args.api, model=args.model, base_url=args.base_url, api_key=args.api_key
+    )
     manager = SessionManager()
     if args.resume:
         sessions = SessionManager.list_sessions()
@@ -423,6 +425,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("-m", "--model", help="model to use (default: $TAU_MODEL or gpt-4.1)")
     parser.add_argument("--base-url", help="OpenAI-compatible API base URL")
     parser.add_argument("--api-key", help="API key")
+    parser.add_argument(
+        "--api",
+        choices=("chat", "responses"),
+        help="OpenAI endpoint flavour (default: $TAU_API or chat); the newest "
+        "models need `responses` to use tools",
+    )
     parser.add_argument("--resume", type=int, metavar="N", help="resume the n-th recent session")
     parser.add_argument("--version", action="version", version=f"tau {__version__}")
     args = parser.parse_args(argv)

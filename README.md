@@ -59,6 +59,21 @@ export TAU_API_KEY=your-zai-key
 export TAU_MODEL=glm-4.6
 ```
 
+**OpenAI Responses API** — from GPT-5.4 on, `chat/completions` allows function
+tools only with `reasoning_effort: none`, and `gpt-6-astra` / `gpt-6.1-sol`
+reject `none` outright. Those models work only on `/v1/responses`, which tau
+speaks when asked (`--api responses` or `TAU_API=responses`):
+
+```bash
+export TAU_API=responses
+export TAU_MODEL=gpt-6.1-sol
+export TAU_REASONING_EFFORT=medium   # optional; the model's default otherwise
+```
+
+tau does not read `reasoning_content` off this endpoint; reasoning arrives as
+a summary, so `/thinking` shows the model's own summary rather than raw
+reasoning.
+
 
 ## Use
 
@@ -80,7 +95,8 @@ A session is tau's record of a conversation. The pieces mirror pi:
   definitions; the provider streams an assistant response containing text
   and/or tool calls; tau executes each tool call and records the results.
   Tool results trigger another turn; otherwise the run ends.
-- **Provider** — one `chat/completions` request per turn, streamed over
+- **Provider** — one request per turn — `chat/completions` by default, or
+  `/v1/responses` for models that refuse tools on chat-completions — streamed over
   `urllib` and parsed line by line as SSE, so there is no client SDK to depend
   on. Text, reasoning, and tool-call deltas accumulate into the finished
   message; `transport=` swaps the HTTP layer out (the tests inject a stand-in).

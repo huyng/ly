@@ -4,7 +4,7 @@ import email.message
 import http.client
 import json
 import urllib.error
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import pytest
 
@@ -18,12 +18,13 @@ from tau.messages import (
     deserialize_message,
     serialize_message,
 )
-from tau.provider import (
+from tau.providers import (
     MissingCredentialsError,
     OpenAIProvider,
     ProviderError,
     stream_chunk_transport,
 )
+from tau.tools import Tool
 
 
 class FakeTransport:
@@ -71,15 +72,31 @@ def collect(provider, messages):
             return events, stop.value
 
 
-def make_provider(chunks) -> tuple[OpenAIProvider, FakeTransport]:
+def make_provider(chunks, model="deepseek-flash") -> tuple[OpenAIProvider, FakeTransport]:
     transport = FakeTransport(chunks)
     provider = OpenAIProvider(
-        model="deepseek-flash",
+        model=model,
         base_url="https://api.deepseek.com",
         api_key="test-key",
         transport=transport,
     )
     return provider, transport
+
+
+class NoopTool(Tool):
+    """Minimal tool, so a request body has a function schema to carry."""
+
+    name = "noop"
+    description = "Does nothing."
+    parameters: ClassVar[dict[str, Any]] = {}
+
+    def execute(self, **kwargs: Any):
+        raise NotImplementedError
+
+
+def body_with_tools(provider: OpenAIProvider) -> dict[str, Any]:
+    """The request body tau would send for one turn that has tools."""
+    return json.loads(provider._request_body("system", [], [NoopTool()]))
 
 
 def test_reasoning_is_streamed_stored_and_sent_back():
@@ -371,22 +388,65 @@ def test_request_omits_tools_when_none_are_present():
 
 
 def test_request_includes_tool_schemas_when_present():
-    from tau.tools import Tool
-
-    class NoopTool(Tool):
-        name = "noop"
-        description = "Does nothing."
-        parameters: dict[str, Any] = {}
-
-        def execute(self, **kwargs: Any):
-            raise NotImplementedError
-
     provider, transport = make_provider([])
     stream = provider.stream("system", [], [NoopTool()])
     with pytest.raises(StopIteration):
         next(stream)
 
     assert transport.body["tools"][0]["function"]["name"] == "noop"
+
+
+def test_request_omits_reasoning_effort_by_default(monkeypatch):
+    monkeypatch.setenv("TAU_REASONING_EFFORT", "  ")
+    provider, transport = make_provider([chunk(content="ok")])
+
+    collect(provider, [UserMessage(content="hi")])
+
+    assert "reasoning_effort" not in transport.body
+
+
+def test_reasoning_effort_can_be_set_with_env(monkeypatch):
+    monkeypatch.setenv("TAU_REASONING_EFFORT", "none")
+    provider, transport = make_provider([chunk(content="ok")])
+
+    collect(provider, [UserMessage(content="hi")])
+
+    assert transport.body["reasoning_effort"] == "none"
+
+
+def test_newer_models_get_none_effort_when_tools_are_present(monkeypatch):
+    """Omitting the field is not the same as "none": these models default to
+    medium, which chat-completions refuses alongside function tools."""
+    monkeypatch.delenv("TAU_REASONING_EFFORT", raising=False)
+    provider, _ = make_provider([], model="gpt-5.6-luna")
+
+    assert body_with_tools(provider)["reasoning_effort"] == "none"
+
+
+def test_none_effort_is_not_forced_without_tools(monkeypatch):
+    monkeypatch.delenv("TAU_REASONING_EFFORT", raising=False)
+    provider, _ = make_provider([], model="gpt-5.6-luna")
+
+    body = json.loads(provider._request_body("system", [], []))
+
+    assert "reasoning_effort" not in body
+
+
+def test_models_that_reject_none_get_no_effort_default(monkeypatch):
+    """gpt-6.1-sol 400s on reasoning_effort "none"; it needs /v1/responses,
+    so sending the field would only swap one error for another."""
+    monkeypatch.delenv("TAU_REASONING_EFFORT", raising=False)
+    for model in ("gpt-6.1-sol", "gpt-6-astra"):
+        provider, _ = make_provider([], model=model)
+
+        assert "reasoning_effort" not in body_with_tools(provider), model
+
+
+def test_explicit_reasoning_effort_beats_the_none_default(monkeypatch):
+    monkeypatch.setenv("TAU_REASONING_EFFORT", "high")
+    provider, _ = make_provider([], model="gpt-5.6-luna")
+
+    assert body_with_tools(provider)["reasoning_effort"] == "high"
 
 
 def test_tool_call_deltas_accumulate_across_chunks():

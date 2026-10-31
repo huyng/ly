@@ -1,6 +1,11 @@
 """Tests for the built-in tools: read, write, bash process handling, and the
 edit tool's offset-based application and unified-diff output."""
 
+import os
+import subprocess
+import sys
+import time
+
 import pytest
 
 from tau.tools.bash import MAX_OUTPUT_BYTES, MAX_OUTPUT_LINES, BashTool
@@ -269,6 +274,64 @@ def test_bash_timeout_without_output_says_only_that(bash):
 
     assert result.output == "Error: command timed out after 1s"
     assert result.is_error
+
+
+def _gone(pid: int) -> bool:
+    """Whether the pid is dead. Polled: a SIGKILLed grandchild is reparented to
+    init and reaped a moment later, so one check can still see the zombie."""
+    for _ in range(200):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_bash_timeout_kills_the_whole_process_group(bash, tmp_path):
+    """A timed-out call must not leave its grandchild running.
+
+    The shell execs the command, so killing the shell alone (what
+    `subprocess.run` did) leaks the command itself; the pid is recorded so the
+    assertion can look for it rather than trusting the exit code.
+    """
+    pidfile = tmp_path / "grandchild.pid"
+    result = bash.execute(command=f"sleep 30 & echo $! > {pidfile}; wait", timeout=1)
+
+    assert "timed out after 1s" in result.output
+    assert _gone(int(pidfile.read_text()))
+
+
+#: Stands in for the keyboard: SIGALRM raises the same KeyboardInterrupt that
+#: Ctrl-C does, from inside `execute`'s blocking wait.
+_INTERRUPTED = """
+import signal
+from tau.tools.bash import BashTool
+
+def interrupt(*_):
+    raise KeyboardInterrupt
+
+signal.signal(signal.SIGALRM, interrupt)
+signal.setitimer(signal.ITIMER_REAL, 0.5)
+try:
+    BashTool().execute("sleep 30 & echo $! > {pidfile}; wait")
+except KeyboardInterrupt:
+    print("interrupted")
+"""
+
+
+def test_bash_interrupt_kills_the_whole_process_group(tmp_path):
+    pidfile = tmp_path / "grandchild.pid"
+    run = subprocess.run(
+        [sys.executable, "-c", _INTERRUPTED.format(pidfile=pidfile)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert "interrupted" in run.stdout
+    assert _gone(int(pidfile.read_text()))
 
 
 def test_bash_keeps_the_last_lines_when_truncating(bash):

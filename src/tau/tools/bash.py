@@ -1,5 +1,6 @@
 import os
 import re
+import signal
 import subprocess
 import tempfile
 from typing import Any, BinaryIO
@@ -71,6 +72,22 @@ def _truncate(output: str) -> str:
     )
 
 
+def _kill_group(proc: subprocess.Popen[bytes]) -> None:
+    """SIGKILL the call's whole process group, then reap the shell.
+
+    `shell=True` makes the direct child `/bin/sh`, which execs the command as a
+    grandchild of ours; killing only the shell leaves that grandchild running
+    with nothing left to stop it. `start_new_session` makes the shell a group
+    leader, so its pid is the group id and one killpg reaches everything the
+    call started.
+    """
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:  # the shell already exited
+        pass
+    proc.wait()
+
+
 class BashTool(Tool):
     name = "bash"
     description = (
@@ -94,22 +111,29 @@ class BashTool(Tool):
         self, command: str, timeout: int | None = None, **_: Any
     ) -> ToolResult:
         timeout_seconds = timeout or DEFAULT_TIMEOUT
-        # Regular files, not pipes: `subprocess.run` waits for pipe EOF, so a
+        # Regular files, not pipes: `wait` on a pipe waits for EOF, so a
         # backgrounded grandchild (`nohup srv &`) inheriting the pipe would keep
         # the call hanging until the timeout. Output files are unlinked at
         # creation, so nothing is left on disk however the call ends.
         with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            # `start_new_session` puts the shell in its own process group so
+            # `_kill_group` can reach the whole tree. The cost is the controlling
+            # terminal: a command that opens /dev/tty (an editor, a password
+            # prompt) now fails instead of prompting, and the terminal's Ctrl-C no
+            # longer reaches the child — the interrupt is forwarded below instead.
+            proc = subprocess.Popen(
+                command,
+                shell=True,
+                cwd=self.cwd,
+                env=_child_env(),
+                stdout=out,
+                stderr=err,
+                start_new_session=True,
+            )
             try:
-                proc = subprocess.run(
-                    command,
-                    shell=True,
-                    cwd=self.cwd,
-                    env=_child_env(),
-                    stdout=out,
-                    stderr=err,
-                    timeout=timeout_seconds,
-                )
+                proc.wait(timeout=timeout_seconds)
             except subprocess.TimeoutExpired:
+                _kill_group(proc)
                 # Whatever the command produced before the deadline is still
                 # valuable — a build that fails at 95% has already said why.
                 partial = _combined(_read(out), _read(err))
@@ -120,6 +144,11 @@ class BashTool(Tool):
                     _truncate(f"{header}\nPartial output:\n{partial}"),
                     is_error=True,
                 )
+            except BaseException:
+                # Ctrl-C arrives here as KeyboardInterrupt. Any other exit takes
+                # the same path: nothing the call started may outlive it.
+                _kill_group(proc)
+                raise
 
             output = _combined(_read(out), _read(err))
         status = f"[exit code: {proc.returncode}]"

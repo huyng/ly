@@ -23,6 +23,7 @@ def create_agent_session(
     model: str | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
+    api: str | None = None,
     cwd: str | None = None,
     tools: list[Tool] | None = None,
     persistent: bool = True,
@@ -35,9 +36,9 @@ def create_agent_session(
     used.
     """
     from .prompts import build_system_prompt
-    from .provider import OpenAIProvider
+    from .providers import make_provider
 
-    provider = OpenAIProvider(model=model, base_url=base_url, api_key=api_key)
+    provider = make_provider(api=api, model=model, base_url=base_url, api_key=api_key)
     in_memory = False if persistent else True
     session_manager = SessionManager(in_memory=in_memory)
     return AgentSession(

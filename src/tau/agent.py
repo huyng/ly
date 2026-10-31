@@ -39,7 +39,7 @@ from .messages import (
     UserMessage,
 )
 from .policy import basic_guard
-from .provider import Provider, ProviderError
+from .providers import Provider, ProviderError
 from .session import SessionManager
 from .tools import Tool, ToolResult, validate_arguments
 
@@ -170,11 +170,11 @@ class AgentSession:
                 if asst_message is None:
                     aborted = True
                     break
-                if asst_message.stop_reason == "toolUse" and asst_message.tool_calls:
-                    # Runs even when an abort is already pending: the calls it
-                    # skips still need results before the branch can be sent again.
+                if asst_message.tool_calls and asst_message.stop_reason in ("toolUse", "aborted"):
+                    # Even partial calls from an aborted stream need results
+                    # before the branch can be sent again.
                     if not self._execute_tool_calls(asst_message):
-                        aborted = True  # aborted between tool calls
+                        aborted = True
                         break
                     continue  # tool results require another model request
                 if asst_message.stop_reason == "aborted" or self._abort_event.is_set():
@@ -359,7 +359,7 @@ class AgentSession:
             # Emitted before the abort check so every announced call is closed on
             # the far side too, even when it never runs.
             self._emit(ToolExecutionStartEvent(tool_call=call))
-            if self._abort_event.is_set():
+            if assistant.stop_reason == "aborted" or self._abort_event.is_set():
                 self._abandon(calls[index:])
                 return False
             try:

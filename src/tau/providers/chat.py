@@ -24,6 +24,7 @@ from .base import (
     HTTPBackend,
     ProviderError,
 )
+
 # OpenAI's documented reasons, plus the DeepSeek-specific failures tau has seen.
 _STOP_REASONS = {
     "tool_calls": "toolUse",
@@ -42,8 +43,7 @@ class ChatCompletionsBackend(HTTPBackend):
     # -- request construction ------------------------------------------------
 
     def _request_messages(
-        self, system_prompt: str,
-        messages: list[AgentMessage]
+        self, system_prompt: str, messages: list[AgentMessage]
     ) -> list[dict[str, Any]]:
 
         request: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
@@ -252,7 +252,6 @@ class ChatCompletionsBackend(HTTPBackend):
             error_message=failure_reason,
             reasoning_content="".join(reasoning_parts) or None,
         )
-
 
 
 def _usage_from(payload: Any) -> Usage | None:

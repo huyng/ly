@@ -7,6 +7,7 @@ Modes:
 
 import argparse
 import os
+import readline  # noqa: F401 — side effect: line editing for input(), see _read
 import select
 import sys
 import time
@@ -305,6 +306,10 @@ class Repl:
         tty, so drain it while data is ready and join on newlines. Only a real
         terminal behaves that way: with piped stdin the leftover lines sit in
         Python's buffer, where the peek would miss them.
+
+        The line is editable (Ctrl-A/Ctrl-E, arrow-key history) because
+        `readline` is imported at module level; `input()` only gets that
+        behaviour when the module has been imported.
         """
         try:
             first = input(prompt)

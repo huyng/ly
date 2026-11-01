@@ -24,6 +24,14 @@ from .base import (
     HTTPBackend,
     ProviderError,
 )
+# OpenAI's documented reasons, plus the DeepSeek-specific failures tau has seen.
+_STOP_REASONS = {
+    "tool_calls": "toolUse",
+    "length": "length",
+    "aborted": "aborted",
+    "content_filter": "error",
+    "insufficient_system_resource": "error",
+}
 
 
 class ChatCompletionsBackend(HTTPBackend):
@@ -34,8 +42,10 @@ class ChatCompletionsBackend(HTTPBackend):
     # -- request construction ------------------------------------------------
 
     def _request_messages(
-        self, system_prompt: str, messages: list[AgentMessage]
+        self, system_prompt: str,
+        messages: list[AgentMessage]
     ) -> list[dict[str, Any]]:
+
         request: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         # Only the trailing assistant message is still in flight. Echoing reasoning
         # for finished turns is dead weight — no model reads it again, and it was
@@ -243,15 +253,6 @@ class ChatCompletionsBackend(HTTPBackend):
             reasoning_content="".join(reasoning_parts) or None,
         )
 
-
-# OpenAI's documented reasons, plus the DeepSeek-specific failures tau has seen.
-_STOP_REASONS = {
-    "tool_calls": "toolUse",
-    "length": "length",
-    "aborted": "aborted",
-    "content_filter": "error",
-    "insufficient_system_resource": "error",
-}
 
 
 def _usage_from(payload: Any) -> Usage | None:

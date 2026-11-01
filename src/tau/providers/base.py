@@ -65,8 +65,7 @@ class MissingCredentialsError(ProviderError):
 
     def __init__(self):
         super().__init__(
-            "Missing credentials. Set OPENAI_API_KEY or TAU_API_KEY\n"
-            "(DEEPSEEK_API_KEY with a DeepSeek base URL), or pass --api-key.",
+            "Missing credentials. Set TAU_API_KEY or pass --api-key.",
             retryable=False,
         )
 
@@ -101,7 +100,7 @@ class HTTPBackend:
     """Configuration and headers for one OpenAI-flavoured endpoint.
 
     Configuration precedence: explicit arguments, then TAU_* environment
-    variables, then OPENAI_* environment variables, then defaults.
+    variables, then defaults. Only the base URL falls back to OPENAI_BASE_URL.
     """
 
     def __init__(

@@ -20,10 +20,13 @@ tau
 Point tau to an LLM provider by setting environment variables. It is compatible with any OpenAI-API compatible endpoint.
 
 ```bash
-export TAU_API_KEY=sk-              # or TAU_API_KEY
+export TAU_API_KEY=sk-              # API key for the selected provider
 export TAU_MODEL=gpt-4.1            # The model you would like to use
 export TAU_BASE_URL=
 ```
+
+Only `TAU_API_KEY` is read for API keys; provider-specific key environment
+variables are ignored. Use `--api-key` to override it for one invocation.
 
 ### Providers
 

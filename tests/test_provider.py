@@ -22,6 +22,7 @@ from tau.providers import (
     ChatCompletionsBackend,
     MissingCredentialsError,
     ProviderError,
+    ResponsesBackend,
     stream_chunk_transport,
 )
 from tau.tools import Tool
@@ -583,24 +584,33 @@ def test_stream_that_yields_no_text_has_no_empty_text_block():
     assert message.stop_reason == "stop"
 
 
-def test_missing_credentials_raise_at_construction(monkeypatch):
-    for var in ("TAU_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"):
-        monkeypatch.delenv(var, raising=False)
-
-    with pytest.raises(MissingCredentialsError):
-        ChatCompletionsBackend(model="m", base_url="https://api.openai.com/v1")
-
-
-def test_deepseek_key_is_only_used_for_deepseek_urls(monkeypatch):
+@pytest.mark.parametrize("backend", [ChatCompletionsBackend, ResponsesBackend])
+@pytest.mark.parametrize(
+    "base_url", ["https://api.openai.com/v1", "https://api.deepseek.com"]
+)
+def test_missing_credentials_raise_at_construction(monkeypatch, backend, base_url):
     monkeypatch.delenv("TAU_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "ignored-openai-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ignored-deepseek-key")
 
-    deepseek = ChatCompletionsBackend(base_url="https://api.deepseek.com")
-    assert deepseek.api_key == "ds-key"
+    with pytest.raises(MissingCredentialsError) as exc:
+        backend(base_url=base_url)
+    assert str(exc.value) == "Missing credentials. Set TAU_API_KEY or pass --api-key."
 
-    with pytest.raises(MissingCredentialsError):
-        ChatCompletionsBackend(base_url="https://api.openai.com/v1")
+
+@pytest.mark.parametrize("backend", [ChatCompletionsBackend, ResponsesBackend])
+@pytest.mark.parametrize(
+    "base_url", ["https://api.openai.com/v1", "https://api.deepseek.com"]
+)
+@pytest.mark.parametrize("api_key", [None, "explicit-key"])
+def test_api_key_precedence(monkeypatch, backend, base_url, api_key):
+    monkeypatch.setenv("TAU_API_KEY", "tau-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "ignored-openai-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ignored-deepseek-key")
+
+    provider = backend(base_url=base_url, api_key=api_key)
+
+    assert provider.api_key == (api_key or "tau-key")
 
 
 def test_abort_mid_stream_closes_transport_and_reports_aborted():

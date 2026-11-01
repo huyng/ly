@@ -166,6 +166,9 @@ class AgentSession:
         try:
             while True:
                 self._maybe_compact()
+                if self._abort_event.is_set():
+                    aborted = True
+                    break
                 asst_message = self._run_turn()
                 if asst_message is None:
                     aborted = True
@@ -278,6 +281,8 @@ class AgentSession:
             )
             return False
 
+        if self._abort_event.is_set():
+            return False
         self.session_manager.compact(summary_message, keep)
         self._emit(
             CompactionEndEvent(

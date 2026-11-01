@@ -1,6 +1,7 @@
 """Tests for context compaction: splitting, session re-rooting, and the
 agent loop's threshold behavior."""
 
+import threading
 from typing import Any
 
 import pytest
@@ -325,6 +326,71 @@ def test_failed_summary_leaves_history_untouched():
     assert len(provider.requests) == 2  # summary attempt, then the real turn
 
 
+@pytest.mark.parametrize("stop_reason", ["aborted", "length", "toolUse"])
+def test_unfinished_summary_leaves_history_untouched(stop_reason):
+    summary = reply("partial notes")
+    summary.stop_reason = stop_reason
+    session, provider = make_session([summary])
+    build_history(session.session_manager, 3)
+    manager = session.session_manager
+    entries = dict(manager.entries)
+    current_id = manager.current_id
+
+    assert session.compact() is False
+
+    assert manager.entries == entries
+    assert manager.current_id == current_id
+    assert len(provider.requests) == 1
+
+
+def test_cancellation_before_branch_update_preserves_history(monkeypatch):
+    session, _ = make_session([])
+    build_history(session.session_manager, 3)
+    manager = session.session_manager
+    entries = dict(manager.entries)
+    current_id = manager.current_id
+
+    def cancelled_summary(*_):
+        session.abort()
+        return "SUM"
+
+    monkeypatch.setattr("tau.agent.summarize", cancelled_summary)
+
+    assert session.compact() is False
+    assert manager.entries == entries
+    assert manager.current_id == current_id
+
+
+@pytest.mark.parametrize("stop_reason", ["stop", "aborted"])
+def test_cancelled_compaction_stops_the_run(stop_reason):
+    summary = reply("partial notes")
+    summary.stop_reason = stop_reason
+    session, provider = make_session([summary], max_summary_input_tokens=200)
+    build_history(session.session_manager, 3)
+    current_id = session.session_manager.current_id
+
+    class CancellingProvider(FakeProvider):
+        def stream(self, system_prompt, messages, tools, abort_event=None):
+            result = yield from super().stream(system_prompt, messages, tools, abort_event)
+            if stop_reason == "stop":
+                session.abort()
+            return result
+
+    provider = CancellingProvider(provider.turns)
+    session.provider = provider
+
+    result = session.prompt("next")
+
+    assert result.stop_reason == "aborted"
+    assert session.busy is False
+    assert len(provider.requests) == 1
+    assert len(summary_requests(provider)) == 1
+    assert session.session_manager.current_id != current_id
+    assert user_texts(session.messages)[0].startswith("question 0")
+    assert user_texts(session.messages)[-1] == "next"
+    assert len(session.messages) == 8  # original history, new prompt, aborted stub
+
+
 def test_failed_summary_is_not_retried_within_the_run():
     # An unknown-tool call forces a second loop iteration, which would try to
     # compact again if the failure flag were not sticky for the run.
@@ -397,6 +463,17 @@ def test_compact_returns_false_with_too_few_turns():
 
 
 # -- summarize() ---------------------------------------------------------------
+
+
+def test_summarize_does_not_request_a_batch_after_cancellation():
+    provider = FakeProvider([reply("SUM")])
+    abort_event = threading.Event()
+    abort_event.set()
+
+    with pytest.raises(RuntimeError, match="compaction aborted"):
+        summarize(provider, [UserMessage(content="hi")], CompactionConfig(), abort_event)
+
+    assert provider.requests == []
 
 
 def test_summarize_rejects_empty_summary():

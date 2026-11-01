@@ -182,6 +182,8 @@ def summarize(
     """
     summary = ""
     for batch in _batches(messages, config.max_summary_input_tokens):
+        if abort_event is not None and abort_event.is_set():
+            raise RuntimeError("compaction aborted")
         request = SUMMARY_REQUEST.format(
             summary=_clip(summary.strip(), MAX_USER_CHARS) or "(none)",
             transcript=render_transcript(batch),
@@ -189,8 +191,14 @@ def summarize(
         message = _complete(provider, request, abort_event)
         if usage is not None:
             usage.add(message.usage)
-        if message.stop_reason == "error":
-            raise RuntimeError(message.error_message or "provider error during compaction")
+        if message.stop_reason == "aborted" and abort_event is not None:
+            abort_event.set()
+        if abort_event is not None and abort_event.is_set():
+            raise RuntimeError("compaction aborted")
+        if message.stop_reason != "stop":
+            raise RuntimeError(
+                message.error_message or f"summary did not complete: {message.stop_reason}"
+            )
         text = message.text.strip()
         if not text:
             raise RuntimeError("provider returned an empty summary")

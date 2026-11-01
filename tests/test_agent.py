@@ -3,6 +3,8 @@
 import json
 from typing import Any, cast
 
+import pytest
+
 from tau.agent import AgentSession
 from tau.events import (
     AgentEndEvent,
@@ -19,9 +21,10 @@ from tau.messages import (
     TextContent,
     ToolCall,
     ToolResultMessage,
+    Usage,
     UserMessage,
 )
-from tau.providers import ProviderError
+from tau.providers import OpenAIProvider, ProviderError, ResponsesProvider
 from tau.session import SessionManager
 from tau.tools import Tool, ToolResult
 from tau.tools.task import TaskTool
@@ -369,7 +372,7 @@ def test_abort_during_retry_stops_without_another_request(tmp_path):
 
         def stream(self, *_args, **_kwargs):
             self.calls += 1
-            raise RuntimeError("boom")
+            raise ProviderError("boom")
 
     provider = FailingProvider()
     session = AgentSession(
@@ -512,7 +515,7 @@ def test_create_agent_session_binds_tools_to_the_requested_cwd(tmp_path, monkeyp
     }
 
 
-def failing_provider(reason):
+def failing_provider(reason, *, retryable=False):
     class Provider:
         name = "fake"
         model = "fake-model"
@@ -522,19 +525,10 @@ def failing_provider(reason):
 
         def stream(self, *_args, **_kwargs):
             self.calls += 1
-            message = AssistantMessage(
-                content=[],
-                model="fake-model",
-                provider="fake",
-                stop_reason="error",
-                error_message=reason,
+            raise ProviderError(
+                reason, retryable=retryable,
+                usage=Usage(input=10, output=5, total_tokens=15),
             )
-
-            def gen():
-                return message
-                yield  # pragma: no cover - keeps this a generator
-
-            return gen()
 
     return Provider()
 
@@ -555,7 +549,7 @@ def test_content_filter_is_not_retried(tmp_path, monkeypatch):
 
 def test_server_overload_is_retried(tmp_path, monkeypatch):
     monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
-    provider = failing_provider("insufficient_system_resource")
+    provider = failing_provider("insufficient_system_resource", retryable=True)
     session = AgentSession(
         provider=provider,
         tools=[],
@@ -565,6 +559,113 @@ def test_server_overload_is_retried(tmp_path, monkeypatch):
 
     assert session.prompt("hi").stop_reason == "error"
     assert provider.calls == 3
+    assert session.usage.total_tokens == 45
+
+
+@pytest.mark.parametrize("event_type", [TextDeltaEvent, MessageEndEvent])
+@pytest.mark.parametrize("error_type", [RuntimeError, ProviderError])
+def test_subscriber_failure_is_not_retried(event_type, error_type):
+    message = AssistantMessage(content=[TextContent(text="done")], model="fake", provider="fake")
+    provider = FakeProvider([message])
+    session = AgentSession(
+        provider=provider, tools=[], session_manager=SessionManager(in_memory=True),
+        system_prompt="test",
+    )
+
+    def fail(event):
+        if isinstance(event, event_type):
+            raise error_type("callback failed")
+
+    session.subscribe(fail)
+    with pytest.raises(error_type, match="callback failed"):
+        session.prompt("hi")
+
+    assert len(provider.requests) == 1
+    assert session.busy is False
+    saved = [m for m in session.messages if isinstance(m, AssistantMessage)]
+    assert len(saved) == (1 if event_type is MessageEndEvent else 0)
+
+
+@pytest.mark.parametrize("error_type", [OSError, ProviderError])
+def test_persistence_failure_is_not_retried(monkeypatch, error_type):
+    message = AssistantMessage(content=[TextContent(text="done")], model="fake", provider="fake")
+    provider = FakeProvider([message])
+    manager = SessionManager(in_memory=True)
+    session = AgentSession(
+        provider=provider, tools=[], session_manager=manager, system_prompt="test",
+    )
+    append = manager.append
+
+    def fail(message):
+        if isinstance(message, AssistantMessage):
+            raise error_type("write failed")
+        return append(message)
+
+    monkeypatch.setattr(manager, "append", fail)
+    with pytest.raises(error_type, match="write failed"):
+        session.prompt("hi")
+
+    assert len(provider.requests) == 1
+    assert session.busy is False
+
+
+@pytest.mark.parametrize("during_stream", [False, True])
+def test_unexpected_provider_failure_is_not_retried(during_stream):
+    class BrokenProvider(FakeProvider):
+        calls = 0
+
+        def stream(self, *_args, **_kwargs):
+            self.calls += 1
+            if not during_stream:
+                raise RuntimeError("provider bug")
+
+            def generate():
+                yield TextDeltaEvent(delta="partial")
+                raise RuntimeError("provider bug")
+
+            return generate()
+
+    provider = BrokenProvider([])
+    session = AgentSession(
+        provider=provider, tools=[], session_manager=SessionManager(in_memory=True),
+        system_prompt="test",
+    )
+    with pytest.raises(RuntimeError, match="provider bug"):
+        session.prompt("hi")
+
+    assert provider.calls == 1
+    assert session.busy is False
+
+
+@pytest.mark.parametrize("api", ["chat", "responses"])
+def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
+    monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
+    requests = []
+
+    def transport(*args, **kwargs):
+        requests.append(args)
+        if api == "chat":
+            yield {
+                "choices": [{"delta": {}, "finish_reason": "insufficient_system_resource"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            }
+        else:
+            yield {"type": "response.failed", "response": {
+                "error": {"code": "server_error", "message": "try later"},
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+            }}
+
+    provider_type = OpenAIProvider if api == "chat" else ResponsesProvider
+    provider = provider_type(api_key="test", transport=transport)
+    session = AgentSession(
+        provider=provider, tools=[], session_manager=SessionManager(in_memory=True),
+        system_prompt="test",
+    )
+
+    assert session.prompt("hi").stop_reason == "error"
+    assert len(requests) == 3
+    assert session.usage.total_tokens == 45
+    assert len(session.messages) == 2
 
 
 def test_repl_renders_text_and_reasoning_deltas(capsys):

@@ -26,7 +26,7 @@ from ..messages import (
     UserMessage,
 )
 from ..tools import Tool
-from .base import HTTPProvider, _as_int, _close_stream
+from .base import HTTPProvider, ProviderError, _as_int, _close_stream
 
 
 class ResponsesProvider(HTTPProvider):
@@ -133,6 +133,7 @@ class ResponsesProvider(HTTPProvider):
         usage = Usage()
         stop_reason = "stop"
         failure_reason: str | None = None
+        retryable = False
         aborted = False
 
         try:
@@ -180,16 +181,30 @@ class ResponsesProvider(HTTPProvider):
                         failure_reason = "content_filter"
                 elif kind in ("response.failed", "error"):
                     stop_reason = "error"
-                    error = _mapping(_mapping(chunk.get("response")).get("error"))
+                    response = _mapping(chunk.get("response"))
+                    usage = _usage_from(response.get("usage")) or usage
+                    error = _mapping(response.get("error")) or chunk
+                    retryable = error.get("code") in (
+                        "server_error", "rate_limit_exceeded", "insufficient_system_resource",
+                    )
                     failure_reason = (
                         _text(error.get("message"))
                         or _text(chunk.get("message"))
                         or "response failed"
                     )
+        except ProviderError as exc:
+            if exc.usage is None:
+                exc.usage = usage
+            raise
         except KeyboardInterrupt:
             aborted = True
         finally:
             _close_stream(chunks)
+
+        if not aborted and stop_reason == "error":
+            raise ProviderError(
+                failure_reason or "response failed", retryable=retryable, usage=usage,
+            )
 
         content: list[TextContent | ToolCall] = []
         if text := "".join(text_parts):

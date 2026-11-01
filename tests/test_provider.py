@@ -196,15 +196,23 @@ def test_reasoning_is_sent_back_alongside_tool_calls():
     assert assistant["tool_calls"][0]["function"]["name"] == "read"
 
 
-def test_deepseek_failure_finish_reasons_map_to_error():
-    provider, _ = make_provider(
-        [chunk(finish_reason="insufficient_system_resource")]
-    )
+@pytest.mark.parametrize(
+    ("reason", "retryable"),
+    [("insufficient_system_resource", True), ("content_filter", False)],
+)
+def test_failure_finish_reasons_raise_classified_errors(reason, retryable):
+    provider, transport = make_provider([
+        chunk(finish_reason=reason),
+        chunk(usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
+    ])
 
-    _, message = collect(provider, [UserMessage(content="hi")])
+    with pytest.raises(ProviderError, match=reason) as caught:
+        collect(provider, [UserMessage(content="hi")])
 
-    assert message.stop_reason == "error"
-    assert message.error_message == "insufficient_system_resource"
+    assert caught.value.retryable is retryable
+    assert caught.value.usage is not None
+    assert caught.value.usage.total_tokens == 15
+    assert transport.closed
 
 
 # -- transport: SSE framing and HTTP errors ----------------------------------

@@ -18,7 +18,7 @@ from contextlib import closing
 from typing import Any, Protocol
 
 from ..events import ProviderEvent
-from ..messages import AgentMessage, AssistantMessage
+from ..messages import AgentMessage, AssistantMessage, Usage
 from ..tools import Tool
 
 #: A parsed `data:` payload from the event stream.
@@ -44,13 +44,14 @@ class ProviderError(RuntimeError):
 
     ``retryable`` distinguishes "try again in a moment" (rate limits, 5xx,
     dropped connections) from "this will never succeed" (bad key, bad request,
-    content filtered). The agent loop re-raises the latter immediately instead
-    of burning its retry budget and the user's time on it.
+    content filtered). Permanent failures end the turn without another request.
+    ``usage`` preserves billed tokens when a streamed response ends in failure.
     """
 
-    def __init__(self, message: str, *, retryable: bool = True):
+    def __init__(self, message: str, *, retryable: bool = True, usage: Usage | None = None):
         super().__init__(message)
         self.retryable = retryable
+        self.usage = usage
 
 
 class MissingCredentialsError(ProviderError):
@@ -76,7 +77,8 @@ class Provider(Protocol):
 
     Tests and other hosts can satisfy it with a stand-in instead of a real
     transport. ``stream`` yields events and returns the completed message via
-    StopIteration.value.
+    StopIteration.value. Endpoint failures raise `ProviderError` with explicit
+    retryability; unexpected implementation errors propagate without retries.
     """
 
     name: str

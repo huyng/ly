@@ -46,10 +46,6 @@ from .tools import Tool, ToolResult, validate_arguments
 MAX_RETRIES = 3
 RETRY_DELAYS = (1, 2, 4)
 
-#: Provider finish reasons that mean "try again later" rather than "never".
-#: DeepSeek reports overload this way instead of using an HTTP status.
-RETRYABLE_FINISH_REASONS = frozenset({"insufficient_system_resource"})
-
 
 class AgentSession:
     """Drives one conversation: prompts in, assistant messages and tool results out.
@@ -301,50 +297,46 @@ class AgentSession:
 
     def _run_turn(self) -> AssistantMessage | None:
         """One model request: stream a response, record it, return it."""
-        last_error: Exception | None = None
+        last_error: ProviderError | None = None
         for attempt in range(MAX_RETRIES):
             # Emitted per attempt, not once per turn: a retry re-streams the
             # response from its first token, so hosts must reset their
             # renderers instead of appending to a half-rendered message.
             self._emit(MessageStartEvent())
+            messages, tools = self.messages, list(self.tools.values())
+            stream = None
             try:
-                stream = self.provider.stream(
-                    self.system_prompt,
-                    self.messages,
-                    list(self.tools.values()),
-                    abort_event=self._abort_event,
-                )
                 while True:
                     try:
+                        if stream is None:
+                            stream = self.provider.stream(
+                                self.system_prompt, messages, tools,
+                                abort_event=self._abort_event,
+                            )
                         event = next(stream)
                     except StopIteration as stop:
-                        # The provider hands back the finished message as the
-                        # generator's return value, so the loop is also the return.
                         asst_message: AssistantMessage = stop.value
+                        self.usage.add(asst_message.usage)
+                        self.session_manager.append(asst_message)
+                        self._emit(MessageEndEvent(message=asst_message))
+                        return asst_message
+                    except ProviderError as exc:
+                        last_error = exc
                         break
+                    # Subscriber errors must never become provider retries.
                     self._emit(event)
-                # Counted before the error check: failed attempts still bill tokens.
-                self.usage.add(asst_message.usage)
-                if asst_message.stop_reason == "error":
-                    # Retry without recording the failed attempt; the final
-                    # error message is appended once all retries are exhausted.
-                    reason = asst_message.error_message or "provider error"
-                    raise ProviderError(
-                        reason, retryable=reason in RETRYABLE_FINISH_REASONS
-                    )
-                self.session_manager.append(asst_message)
-                self._emit(MessageEndEvent(message=asst_message))
-                return asst_message
-            except Exception as exc:  # transient provider failures
-                last_error = exc
-                if not getattr(exc, "retryable", True):
-                    # Permanent: retrying cannot help and costs the user time.
-                    break
-                if attempt < MAX_RETRIES - 1:
-                    delay = RETRY_DELAYS[attempt]
-                    self._emit(ErrorEvent(message=f"{exc}; retrying in {delay}s"))
-                    if self._abort_event.wait(delay):
-                        return None
+            finally:
+                if stream is not None:
+                    stream.close()
+            if last_error.usage is not None:
+                self.usage.add(last_error.usage)
+            if not last_error.retryable:
+                break
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_DELAYS[attempt]
+                self._emit(ErrorEvent(message=f"{last_error}; retrying in {delay}s"))
+                if self._abort_event.wait(delay):
+                    return None
         error = AssistantMessage(
             content=[],
             model=self.provider.model,

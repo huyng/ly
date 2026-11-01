@@ -30,6 +30,7 @@ from tau.messages import (
     Usage,
     UserMessage,
 )
+from tau.providers import ProviderError
 from tau.session import SessionManager
 
 
@@ -432,9 +433,26 @@ def test_summary_usage_counts_toward_session_usage():
     assert session.usage.total_tokens == 110
 
 
+def test_failed_summary_usage_counts_toward_session_usage():
+    class FailingProvider(FakeProvider):
+        def stream(self, *_args, **_kwargs):
+            raise ProviderError(
+                "summary failed", retryable=False,
+                usage=Usage(input=100, output=10, total_tokens=110),
+            )
+
+    usage = Usage()
+    with pytest.raises(ProviderError, match="summary failed"):
+        summarize(
+            FailingProvider([]), [UserMessage(content="hi")], CompactionConfig(), usage=usage,
+        )
+
+    assert usage.total_tokens == 110
+
+
 def test_large_histories_are_summarized_in_batches():
     session, provider = make_session(
-        [reply("SUM-1"), reply("SUM-2"), reply("SUM-3"), reply("final")],
+        [*(reply(f"SUM-{index}") for index in range(6)), reply("final")],
         max_summary_input_tokens=200,
     )
     build_history(session.session_manager, 4)
@@ -442,8 +460,9 @@ def test_large_histories_are_summarized_in_batches():
     session.prompt("next")
 
     requests = summary_requests(provider)
-    assert len(requests) > 1
+    assert len(requests) == 6
     assert "Previous summary" in requests[0]["messages"][0].content
+    assert final_text(session.messages) == "final"
 
 
 def test_explicit_compact_works_without_a_prompt():

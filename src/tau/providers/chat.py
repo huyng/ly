@@ -23,6 +23,7 @@ from ..messages import (
 from ..tools import Tool
 from .base import (
     HTTPProvider,
+    ProviderError,
     _as_int,
     _close_stream,
 )
@@ -212,12 +213,23 @@ class OpenAIProvider(HTTPProvider):
                     stop_reason = _STOP_REASONS.get(finish_reason, "stop")
                     if stop_reason == "error":
                         failure_reason = finish_reason
+        except ProviderError as exc:
+            if exc.usage is None:
+                exc.usage = usage
+            raise
         except KeyboardInterrupt:
             # Ctrl-C surfaced inside the stream: finalize as aborted.
             aborted = True
         finally:
             # Deterministic: drop the connection instead of draining it.
             _close_stream(chunks)
+
+        if not aborted and stop_reason == "error":
+            raise ProviderError(
+                failure_reason or "provider error",
+                retryable=failure_reason == "insufficient_system_resource",
+                usage=usage,
+            )
 
         content: list[TextContent | ToolCall] = []
         # No empty text block when nothing was streamed: it would be the whole

@@ -27,6 +27,7 @@ from .messages import (
     Usage,
     UserMessage,
 )
+from .providers import ProviderError
 
 CHARS_PER_TOKEN = 4
 MESSAGE_OVERHEAD_TOKENS = 4
@@ -188,7 +189,12 @@ def summarize(
             summary=_clip(summary.strip(), MAX_USER_CHARS) or "(none)",
             transcript=render_transcript(batch),
         )
-        message = _complete(provider, request, abort_event)
+        try:
+            message = _complete(provider, request, abort_event)
+        except ProviderError as exc:
+            if usage is not None and exc.usage is not None:
+                usage.add(exc.usage)
+            raise
         if usage is not None:
             usage.add(message.usage)
         if message.stop_reason == "aborted" and abort_event is not None:

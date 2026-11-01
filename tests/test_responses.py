@@ -13,7 +13,7 @@ from tau.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from tau.providers import ResponsesProvider, make_provider
+from tau.providers import ProviderError, ResponsesProvider, make_provider
 from tau.tools import Tool
 
 
@@ -216,10 +216,41 @@ def test_failed_response_reports_an_error():
     ]
     provider, _ = make_provider_for(chunks)
 
-    _, message = collect(provider, [UserMessage(content="hi")])
+    with pytest.raises(ProviderError, match="boom") as caught:
+        collect(provider, [UserMessage(content="hi")])
 
-    assert message.stop_reason == "error"
-    assert message.error_message == "boom"
+    assert caught.value.retryable is False
+
+
+@pytest.mark.parametrize("kind", ["response.failed", "error"])
+@pytest.mark.parametrize("code", ["server_error", "rate_limit_exceeded", "invalid_prompt"])
+def test_stream_errors_are_classified_by_code(kind, code):
+    error = {"code": code, "message": "failure details"}
+    payload = {"response": {"error": error, "usage": {
+        "input_tokens": 10, "output_tokens": 5, "total_tokens": 15,
+    }}} if kind == "response.failed" else error
+    provider, transport = make_provider_for([event(kind, **payload)])
+
+    with pytest.raises(ProviderError, match="failure details") as caught:
+        collect(provider, [UserMessage(content="hi")])
+
+    assert caught.value.retryable is (code != "invalid_prompt")
+    if kind == "response.failed":
+        assert caught.value.usage is not None
+        assert caught.value.usage.total_tokens == 15
+    assert transport.closed
+
+
+def test_content_filtered_response_is_not_retryable():
+    provider, _ = make_provider_for([event(
+        "response.incomplete",
+        response={"incomplete_details": {"reason": "content_filter"}},
+    )])
+
+    with pytest.raises(ProviderError, match="content_filter") as caught:
+        collect(provider, [UserMessage(content="hi")])
+
+    assert caught.value.retryable is False
 
 
 def test_incomplete_response_maps_to_length():

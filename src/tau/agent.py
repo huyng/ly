@@ -199,7 +199,6 @@ class AgentSession:
                 content=[],
                 model=self.provider.model,
                 api=self.provider.api,
-                provider=self.provider.provider,
                 stop_reason="aborted",
             )
             self.session_manager.append(asst_message)
@@ -350,7 +349,6 @@ class AgentSession:
             content=[],
             model=self.provider.model,
             api=self.provider.api,
-            provider=self.provider.provider,
             stop_reason="error",
             error_message=str(last_error),
         )

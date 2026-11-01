@@ -234,7 +234,6 @@ class ResponsesBackend(HTTPBackend):
             content=content,
             model=self.model,
             api=self.api,
-            provider=self.provider,
             stop_reason="aborted" if aborted else stop_reason,
             usage=usage,
             error_message=failure_reason,

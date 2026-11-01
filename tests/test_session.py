@@ -82,7 +82,7 @@ def test_round_trip_reload(tmp_path):
     "message",
     [
         UserMessage("hello"),
-        AssistantMessage(content=[], model="fake", provider="fake"),
+        AssistantMessage(content=[], model="fake"),
         ToolResultMessage(tool_call_id="call", tool_name="read", output="hello"),
     ],
 )
@@ -103,10 +103,10 @@ def test_assistant_metadata_round_trip(tmp_path):
         content=[],
         model="model",
         api="openai-responses",
-        provider="deepseek",
     )
     manager.append(message)
     assert manager.file is not None
+    assert "provider" not in serialize_message(message)
 
     restored = SessionManager(directory=tmp_path)
     restored.load(manager.file)
@@ -122,8 +122,9 @@ def test_assistant_metadata_round_trip(tmp_path):
     ],
 )
 def test_legacy_assistant_metadata_loads(tmp_path, provider, api):
-    message = AssistantMessage(content=[], model="model", provider=provider)
+    message = AssistantMessage(content=[], model="model")
     saved = serialize_message(message)
+    saved["provider"] = provider
     saved.pop("api")
     path = touch(
         tmp_path / "legacy.jsonl",
@@ -144,7 +145,7 @@ def test_legacy_assistant_metadata_loads(tmp_path, provider, api):
 
     assert isinstance(restored, AssistantMessage)
     assert restored.api == api
-    assert restored.provider == provider
+    assert "provider" not in serialize_message(restored)
 
 
 def test_active_branch_preserves_timestamps(monkeypatch):

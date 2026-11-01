@@ -159,7 +159,6 @@ def test_reasoning_is_not_sent_to_non_deepseek_providers():
     message = AssistantMessage(
         content=[TextContent(text="hi")],
         model="glm-4.6",
-        provider="openai",
         reasoning_content="private reasoning",
     )
 
@@ -179,7 +178,6 @@ def test_reasoning_passthrough_can_be_forced_with_env(monkeypatch):
     message = AssistantMessage(
         content=[TextContent(text="hi")],
         model="glm-4.6",
-        provider="openai",
         reasoning_content="private reasoning",
     )
 
@@ -195,7 +193,6 @@ def test_reasoning_is_sent_back_alongside_tool_calls():
             ToolCall(id="call_1", name="read", arguments={"path": "a.py"}),
         ],
         model="deepseek-flash",
-        provider="openai",
         stop_reason="toolUse",
         reasoning_content="I should read the file.",
     )
@@ -425,40 +422,15 @@ def test_request_includes_tool_schemas_when_present():
     assert transport.body["tools"][0]["function"]["name"] == "noop"
 
 
-@pytest.mark.parametrize(
-    ("url", "service"),
-    [
-        ("https://api.openai.com/v1", "openai"),
-        ("https://api.deepseek.com", "deepseek"),
-        ("https://api.z.ai/api/paas/v4", "zai"),
-        ("https://proxy.example/v1", "proxy.example"),
-        ("https://proxy.example/deepseek", "proxy.example"),
-    ],
-)
-def test_response_records_api_and_service(url, service):
+def test_response_records_api_and_model():
     backend = ChatCompletionsBackend(
-        base_url=url,
         api_key="test",
         transport=FakeTransport([chunk(content="ok")]),
     )
     _, message = collect(backend, [])
 
     assert message.api == "openai-completions"
-    assert message.provider == service
     assert message.model == backend.model
-
-
-def test_service_identifier_can_be_explicit():
-    backend = ChatCompletionsBackend(
-        base_url="https://proxy.example/v1",
-        api_key="test",
-        provider="my-service",
-        transport=FakeTransport([]),
-    )
-    _, message = collect(backend, [])
-
-    assert message.provider == "my-service"
-    assert message.api == "openai-completions"
 
 
 def test_request_omits_reasoning_effort_by_default(monkeypatch):
@@ -531,14 +503,12 @@ def test_reasoning_from_finished_turns_is_not_sent_back():
     first = AssistantMessage(
         content=[ToolCall(id="c1", name="read", arguments={"path": "a.py"})],
         model="deepseek-flash",
-        provider="openai",
         stop_reason="toolUse",
         reasoning_content="first thoughts",
     )
     second = AssistantMessage(
         content=[ToolCall(id="c2", name="read", arguments={"path": "b.py"})],
         model="deepseek-flash",
-        provider="openai",
         stop_reason="toolUse",
         reasoning_content="recent thoughts",
     )
@@ -564,9 +534,7 @@ def test_request_omits_an_assistant_message_with_no_content():
         api_key="test-key",
         transport=FakeTransport([]),
     )
-    aborted = AssistantMessage(
-        content=[], model="m", provider="openai", stop_reason="aborted"
-    )
+    aborted = AssistantMessage(content=[], model="m", stop_reason="aborted")
 
     request = provider._request_messages(
         "system", [UserMessage(content="hi"), aborted, UserMessage(content="again")]

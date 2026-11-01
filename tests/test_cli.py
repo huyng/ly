@@ -18,7 +18,6 @@ from tau.theme import Theme
 
 class FakeProvider:
     api = "fake"
-    provider = "fake"
     model = "fake-model"
 
     def stream(self, *_args, **_kwargs):
@@ -39,7 +38,6 @@ def make_repl(threshold_tokens: int = 100_000, enabled: bool = True) -> Repl:
         AssistantMessage(
             content=[TextContent(text="done")],
             model="fake",
-            provider="fake",
             usage=Usage(input=82_000, output=12, total_tokens=82_012),
         )
     )

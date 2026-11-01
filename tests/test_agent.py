@@ -34,7 +34,6 @@ class FakeProvider:
     """Scripts a sequence of turns: each turn is an AssistantMessage."""
 
     api = "fake"
-    provider = "fake"
 
     def __init__(self, turns: list[AssistantMessage]):
         self.turns = list(turns)
@@ -115,13 +114,11 @@ def test_agent_loop_tool_call_and_final_text(tmp_path):
     turn1 = AssistantMessage(
         content=[ToolCall(id="c1", name="echo", arguments={"text": "hello"})],
         model="fake-model",
-        provider="fake",
         stop_reason="toolUse",
     )
     turn2 = AssistantMessage(
         content=[TextContent(text="all done")],
         model="fake-model",
-        provider="fake",
         stop_reason="stop",
     )
     session, tool, manager = make_session(tmp_path, [turn1, turn2])
@@ -164,7 +161,6 @@ def test_session_jsonl_persistence(tmp_path):
     turn = AssistantMessage(
         content=[TextContent(text="hi there")],
         model="fake-model",
-        provider="fake",
         stop_reason="stop",
     )
     session, _, manager = make_session(tmp_path, [turn])
@@ -195,13 +191,11 @@ def test_unknown_tool_records_error_result(tmp_path):
     turn1 = AssistantMessage(
         content=[ToolCall(id="c1", name="nonexistent", arguments={})],
         model="fake-model",
-        provider="fake",
         stop_reason="toolUse",
     )
     turn2 = AssistantMessage(
         content=[TextContent(text="recovered")],
         model="fake-model",
-        provider="fake",
         stop_reason="stop",
     )
     session, _, _ = make_session(tmp_path, [turn1, turn2])
@@ -217,13 +211,11 @@ def test_invalid_argument_type_is_rejected_before_execution(tmp_path):
     turn1 = AssistantMessage(
         content=[ToolCall(id="c1", name="echo", arguments={"text": 42})],
         model="fake-model",
-        provider="fake",
         stop_reason="toolUse",
     )
     turn2 = AssistantMessage(
         content=[TextContent(text="retried")],
         model="fake-model",
-        provider="fake",
         stop_reason="stop",
     )
     session, tool, _ = make_session(tmp_path, [turn1, turn2])
@@ -240,13 +232,11 @@ def test_missing_required_argument_is_rejected(tmp_path):
     turn1 = AssistantMessage(
         content=[ToolCall(id="c1", name="echo", arguments={})],
         model="fake-model",
-        provider="fake",
         stop_reason="toolUse",
     )
     turn2 = AssistantMessage(
         content=[TextContent(text="retried")],
         model="fake-model",
-        provider="fake",
         stop_reason="stop",
     )
     session, tool, _ = make_session(tmp_path, [turn1, turn2])
@@ -262,7 +252,6 @@ def test_abort_prevents_tool_execution(tmp_path):
     turn = AssistantMessage(
         content=[ToolCall(id="c1", name="echo", arguments={"text": "nope"})],
         model="fake-model",
-        provider="fake",
         stop_reason="toolUse",
     )
     session, tool, _ = make_session(tmp_path, [turn])
@@ -289,12 +278,9 @@ def test_aborted_tool_stream_answers_every_call_before_next_prompt(tmp_path):
             ToolCall(id="c2", name="echo", arguments={"_raw": '{"text":'}),
         ],
         model="fake-model",
-        provider="fake",
         stop_reason="aborted",
     )
-    reply = AssistantMessage(
-        content=[TextContent(text="resumed")], model="fake-model", provider="fake"
-    )
+    reply = AssistantMessage(content=[TextContent(text="resumed")], model="fake-model")
     provider = FakeProvider([turn, reply])
     tool = EchoTool()
     session = AgentSession(
@@ -345,7 +331,6 @@ def test_interrupt_inside_a_tool_answers_every_call(tmp_path):
             ToolCall(id="c2", name="echo", arguments={"text": "two"}),
         ],
         model="fake-model",
-        provider="fake",
         stop_reason="toolUse",
     )
     manager = SessionManager(directory=tmp_path)
@@ -369,7 +354,6 @@ def test_interrupt_inside_a_tool_answers_every_call(tmp_path):
 def test_abort_during_retry_stops_without_another_request(tmp_path):
     class FailingProvider:
         api = "fake"
-        provider = "fake"
         model = "fake-model"
 
         def __init__(self):
@@ -396,7 +380,6 @@ def test_abort_during_retry_stops_without_another_request(tmp_path):
 
     assert final.stop_reason == "aborted"
     assert final.api == "fake"
-    assert final.provider == "fake"
     assert provider.calls == 1
 
 
@@ -405,7 +388,6 @@ def test_permanent_error_is_not_retried(tmp_path):
 
     class UnauthorizedProvider:
         api = "fake"
-        provider = "fake"
         model = "fake-model"
 
         def __init__(self):
@@ -443,7 +425,6 @@ def test_transient_error_is_retried(tmp_path, monkeypatch):
 
     class FlakyProvider:
         api = "fake"
-        provider = "fake"
         model = "fake-model"
 
         def __init__(self):
@@ -466,7 +447,6 @@ def test_transient_error_is_retried(tmp_path, monkeypatch):
     assert provider.calls == 3
     assert final.stop_reason == "error"
     assert final.api == "fake"
-    assert final.provider == "fake"
     assert "503" in (final.error_message or "")
 
 
@@ -477,7 +457,6 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
 
     class FlakyProvider:
         api = "fake"
-        provider = "fake"
         model = "fake-model"
 
         def __init__(self):
@@ -494,7 +473,6 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
                 return AssistantMessage(
                     content=[TextContent(text="partial done")],
                     model="fake-model",
-                    provider="fake",
                 )
 
             return gen()
@@ -532,7 +510,6 @@ def test_create_agent_session_binds_tools_to_the_requested_cwd(tmp_path, monkeyp
 def failing_provider(reason, *, retryable=False):
     class Provider:
         api = "fake"
-        provider = "fake"
         model = "fake-model"
 
         def __init__(self):
@@ -581,9 +558,7 @@ def test_server_overload_is_retried(tmp_path, monkeypatch):
 @pytest.mark.parametrize("event_type", [TextDeltaEvent, MessageEndEvent])
 @pytest.mark.parametrize("error_type", [RuntimeError, ProviderError])
 def test_subscriber_failure_is_not_retried(event_type, error_type):
-    message = AssistantMessage(
-        content=[TextContent(text="done")], model="fake", provider="fake"
-    )
+    message = AssistantMessage(content=[TextContent(text="done")], model="fake")
     provider = FakeProvider([message])
     session = AgentSession(
         provider=provider,
@@ -608,9 +583,7 @@ def test_subscriber_failure_is_not_retried(event_type, error_type):
 
 @pytest.mark.parametrize("error_type", [OSError, ProviderError])
 def test_persistence_failure_is_not_retried(monkeypatch, error_type):
-    message = AssistantMessage(
-        content=[TextContent(text="done")], model="fake", provider="fake"
-    )
+    message = AssistantMessage(content=[TextContent(text="done")], model="fake")
     provider = FakeProvider([message])
     manager = SessionManager(in_memory=True)
     session = AgentSession(
@@ -728,9 +701,7 @@ def test_repl_renders_text_and_reasoning_deltas(capsys):
     repl._on_event(ReasoningDeltaEvent(delta="thinking... "))
     repl._on_event(TextDeltaEvent(delta="Hello"))
     repl._on_event(TextDeltaEvent(delta=" there"))
-    message = AssistantMessage(
-        content=[TextContent(text="Hello there")], model="m", provider="fake"
-    )
+    message = AssistantMessage(content=[TextContent(text="Hello there")], model="m")
     repl._on_event(MessageEndEvent(message=message))
 
     out = capsys.readouterr().out
@@ -745,13 +716,11 @@ def test_tool_guard_blocks_call_and_reports_to_model(tmp_path):
     turn1 = AssistantMessage(
         content=[ToolCall(id="c1", name="echo", arguments={"text": "hello"})],
         model="fake-model",
-        provider="fake",
         stop_reason="toolUse",
     )
     turn2 = AssistantMessage(
         content=[TextContent(text="blocked")],
         model="fake-model",
-        provider="fake",
         stop_reason="stop",
     )
     session, tool, _ = make_session(tmp_path, [turn1, turn2])
@@ -775,12 +744,9 @@ def test_default_guard_blocks_before_execute(tmp_path):
             )
         ],
         model="fake-model",
-        provider="fake",
         stop_reason="toolUse",
     )
-    turn2 = AssistantMessage(
-        content=[TextContent(text="done")], model="fake-model", provider="fake"
-    )
+    turn2 = AssistantMessage(content=[TextContent(text="done")], model="fake-model")
     tool = SpyWriteTool()
     session = AgentSession(
         provider=FakeProvider([turn1, turn2]),
@@ -808,12 +774,9 @@ def test_default_guard_allows_write_inside_cwd(tmp_path):
             )
         ],
         model="fake-model",
-        provider="fake",
         stop_reason="toolUse",
     )
-    turn2 = AssistantMessage(
-        content=[TextContent(text="done")], model="fake-model", provider="fake"
-    )
+    turn2 = AssistantMessage(content=[TextContent(text="done")], model="fake-model")
     tool = SpyWriteTool()
     session = AgentSession(
         provider=FakeProvider([turn1, turn2]),
@@ -841,24 +804,19 @@ def test_task_subagent_inherits_tool_guard(tmp_path):
                 ToolCall(id="c1", name="task", arguments={"prompt": "investigate"})
             ],
             model="fake-model",
-            provider="fake",
             stop_reason="toolUse",
         ),
         # The sub-agent's turn runs through the parent's guard too.
         AssistantMessage(
             content=[ToolCall(id="c2", name="read", arguments={"path": "x"})],
             model="fake-model",
-            provider="fake",
             stop_reason="toolUse",
         ),
         AssistantMessage(
             content=[TextContent(text="sub report")],
             model="fake-model",
-            provider="fake",
         ),
-        AssistantMessage(
-            content=[TextContent(text="final")], model="fake-model", provider="fake"
-        ),
+        AssistantMessage(content=[TextContent(text="final")], model="fake-model"),
     ]
     session = AgentSession(
         provider=FakeProvider(turns),

@@ -91,7 +91,6 @@ def test_text_deltas_accumulate_and_usage_is_mapped():
     assert "".join(e.delta for e in events if isinstance(e, TextDeltaEvent)) == "Hello"
     assert message.text == "Hello"
     assert message.api == "openai-responses"
-    assert message.provider == "openai"
     assert message.stop_reason == "stop"
     assert message.usage.input == 11
     assert message.usage.output == 4
@@ -347,7 +346,6 @@ def test_request_uses_instructions_and_input_items():
                 ToolCall(id="call_1", name="read", arguments={"path": "a.py"}),
             ],
             model="gpt-6.1-sol",
-            provider="openai",
             stop_reason="toolUse",
         ),
         ToolResultMessage(tool_call_id="call_1", tool_name="read", output="print(1)"),

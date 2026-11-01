@@ -36,7 +36,6 @@ from tau.session import SessionManager
 
 class FakeProvider:
     api = "fake"
-    provider = "fake"
 
     def __init__(self, turns: list[AssistantMessage]):
         self.turns = list(turns)
@@ -63,9 +62,7 @@ class FakeProvider:
 
 
 def reply(text: str) -> AssistantMessage:
-    return AssistantMessage(
-        content=[TextContent(text=text)], model="fake", provider="fake"
-    )
+    return AssistantMessage(content=[TextContent(text=text)], model="fake")
 
 
 def summary_requests(provider) -> list[dict[str, Any]]:
@@ -76,7 +73,6 @@ def unknown_tool_turn() -> AssistantMessage:
     return AssistantMessage(
         content=[ToolCall(id="call-x", name="nope", arguments={})],
         model="fake",
-        provider="fake",
         stop_reason="toolUse",
     )
 
@@ -85,7 +81,6 @@ def failing(message: str = "boom") -> AssistantMessage:
     return AssistantMessage(
         content=[],
         model="fake",
-        provider="fake",
         stop_reason="error",
         error_message=message,
     )
@@ -109,7 +104,6 @@ def build_history(manager, turns: int, usage_input: int = 0) -> None:
             AssistantMessage(
                 content=[TextContent(text=f"answer {index} " + "y" * 400)],
                 model="fake",
-                provider="fake",
                 usage=Usage(input=usage_input),
             )
         )
@@ -161,7 +155,6 @@ def test_split_index_keeps_tool_pairs_together():
         AssistantMessage(
             content=[ToolCall(id="c1", name="read", arguments={"path": "x"})],
             model="fake",
-            provider="fake",
         ),
         ToolResultMessage(tool_call_id="c1", tool_name="read", output="data"),
         UserMessage(content="u1"),
@@ -183,7 +176,6 @@ def test_split_never_cuts_inside_a_turn():
             AssistantMessage(
                 content=[ToolCall(id="c1", name="read", arguments={})],
                 model="fake",
-                provider="fake",
             ),
             ToolResultMessage(tool_call_id="c1", tool_name="read", output="x"),
             UserMessage(content="u1"),
@@ -304,7 +296,6 @@ def test_compaction_trusts_measured_usage_over_a_char_heavy_estimate():
             AssistantMessage(
                 content=[TextContent(text="z" * 40_000 if index == 2 else "answer")],
                 model="fake",
-                provider="fake",
                 usage=Usage(input=1_000),
             )
         )
@@ -438,7 +429,6 @@ def test_summary_usage_counts_toward_session_usage():
     summary = AssistantMessage(
         content=[TextContent(text="SUM")],
         model="fake",
-        provider="fake",
         usage=Usage(input=100, output=10, total_tokens=110),
     )
     session, _ = make_session([summary, reply("final")])

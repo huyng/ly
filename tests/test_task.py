@@ -32,7 +32,6 @@ class FakeProvider:
     """
 
     api = "fake"
-    provider = "fake"
 
     def __init__(self, turns: list[AssistantMessage]):
         self.turns = list(turns)
@@ -60,16 +59,13 @@ class FakeProvider:
 
 
 def reply(text: str) -> AssistantMessage:
-    return AssistantMessage(
-        content=[TextContent(text=text)], model="fake", provider="fake"
-    )
+    return AssistantMessage(content=[TextContent(text=text)], model="fake")
 
 
 def failing(message: str) -> AssistantMessage:
     return AssistantMessage(
         content=[],
         model="fake",
-        provider="fake",
         stop_reason="error",
         error_message=message,
     )
@@ -79,7 +75,6 @@ def task_call(**arguments: Any) -> AssistantMessage:
     return AssistantMessage(
         content=[ToolCall(id="call-1", name="task", arguments=arguments)],
         model="fake",
-        provider="fake",
         stop_reason="toolUse",
     )
 
@@ -130,9 +125,7 @@ def test_subagent_activity_is_live_and_kept_out_of_parent_context(workspace, pat
         workspace,
         [
             task_call(description="explore", prompt="find handler"),
-            AssistantMessage(
-                content=[call], model="fake", provider="fake", stop_reason="toolUse"
-            ),
+            AssistantMessage(content=[call], model="fake", stop_reason="toolUse"),
             reply("report"),
             reply("done"),
         ],
@@ -289,7 +282,6 @@ def test_subagent_spend_counts_toward_parent_usage(workspace):
     report = AssistantMessage(
         content=[TextContent(text="a.py:1")],
         model="fake",
-        provider="fake",
         usage=Usage(input=100, output=5, total_tokens=105),
     )
     session, _ = make_session(

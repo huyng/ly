@@ -12,7 +12,6 @@ import json
 import os
 import threading
 import urllib.error
-import urllib.parse
 import urllib.request
 from collections.abc import Generator, Iterator, Mapping
 from contextlib import closing
@@ -84,7 +83,6 @@ class ModelBackendProtocol(Protocol):
     """
 
     api: str
-    provider: str
     model: str
 
     def stream(
@@ -110,7 +108,6 @@ class HTTPBackend:
         api_key: str | None = None,
         transport: Transport | None = None,
         timeout: float = DEFAULT_TIMEOUT,
-        provider: str | None = None,
     ):
         self.model = model or os.environ.get("TAU_MODEL", "gpt-4.1")
         self.base_url = (
@@ -119,12 +116,6 @@ class HTTPBackend:
             or os.environ.get("OPENAI_BASE_URL")
             or "https://api.openai.com/v1"
         )
-        hostname = urllib.parse.urlsplit(self.base_url).hostname or ""
-        self.provider = provider or {
-            "api.openai.com": "openai",
-            "api.deepseek.com": "deepseek",
-            "api.z.ai": "zai",
-        }.get(hostname, hostname)
         self.api_key = api_key or os.environ.get("TAU_API_KEY")
         self.transport = transport or stream_chunk_transport
         self.timeout = timeout

@@ -166,13 +166,13 @@ def stream_chunk_transport(
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
         response = urllib.request.urlopen(request, timeout=timeout)
-    except urllib.error.HTTPError as exc:
+    except urllib.error.HTTPError as err:
         raise ProviderError(
-            _describe_http_error(exc), retryable=_is_retryable_status(exc.code)
-        ) from exc
-    except urllib.error.URLError as exc:
+            _describe_http_error(err), retryable=_is_retryable_status(err.code)
+        ) from err
+    except urllib.error.URLError as err:
         # DNS failure, refused connection, TLS problem, read timeout.
-        raise ProviderError(f"cannot reach {url}: {exc.reason}") from exc
+        raise ProviderError(f"cannot reach {url}: {err.reason}") from err
 
     try:
         with closing(response):
@@ -187,24 +187,24 @@ def stream_chunk_transport(
                     continue
                 try:
                     chunk = json.loads(payload)
-                except json.JSONDecodeError as exc:  # never lose a turn to a stray line
+                except json.JSONDecodeError as err:  # never lose a turn to a stray line
                     raise ProviderError(
                         f"malformed stream event: {payload[:200]}"
-                    ) from exc
+                    ) from err
                 if isinstance(chunk, dict):
                     yield chunk
-    except (http.client.HTTPException, OSError) as exc:
+    except (http.client.HTTPException, OSError) as err:
         # A connection dropped or timed out mid-stream: the turn is incomplete,
         # and a fresh request is the remedy. ProviderErrors raised above pass
         # through untouched.
-        raise ProviderError(f"stream interrupted: {exc!r}") from exc
+        raise ProviderError(f"stream interrupted: {err!r}") from err
 
 
-def _describe_http_error(exc: urllib.error.HTTPError) -> str:
+def _describe_http_error(err: urllib.error.HTTPError) -> str:
     """Fold an HTTP error into one readable line, preferring the API's message."""
     detail = ""
     try:
-        body = exc.read().decode("utf-8", errors="replace")
+        body = err.read().decode("utf-8", errors="replace")
     except (OSError, http.client.HTTPException, ValueError):
         # The body is a courtesy; never mask the status.
         body = ""
@@ -223,7 +223,7 @@ def _describe_http_error(exc: urllib.error.HTTPError) -> str:
                 detail = str(parsed["message"])
         if not detail:
             detail = " ".join(body.split())[:300]
-    return f"HTTP {exc.code} {exc.reason}" + (f": {detail}" if detail else "")
+    return f"HTTP {err.code} {err.reason}" + (f": {detail}" if detail else "")
 
 
 def _is_retryable_status(code: int | None) -> bool:

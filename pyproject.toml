@@ -30,3 +30,6 @@ pythonVersion = "3.12"
 typeCheckingMode = "basic"
 venvPath = "."
 venv = ".venv"
+
+[tool.black]
+line-length = 88

@@ -156,7 +156,12 @@ def basic_guard(
     if scratch is None:
         # Both, because $TMPDIR on macOS is not /tmp and the model uses either.
         scratch = (os.path.realpath("/tmp"), os.path.realpath(tempfile.gettempdir()))
-    roots = tuple(dict.fromkeys((root, *(os.path.realpath(path) for path in scratch))))
+    writable_roots = [root]
+    for path in scratch:
+        resolved = os.path.realpath(path)
+        if resolved not in writable_roots:
+            writable_roots.append(resolved)
+    roots = tuple(writable_roots)
 
     def guard(call: ToolCall) -> str | None:
         if call.name in deny:

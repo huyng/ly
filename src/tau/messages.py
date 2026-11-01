@@ -128,19 +128,18 @@ def serialize_message(message: AgentMessage) -> dict[str, Any]:
             data["errorMessage"] = message.error_message
         if message.reasoning_content:
             data["reasoningContent"] = message.reasoning_content
-        data["content"] = [
-            (
-                {"type": "text", "text": b.text}
-                if isinstance(b, TextContent)
-                else {
+        blocks: list[dict[str, Any]] = []
+        for block in message.content:
+            if isinstance(block, TextContent):
+                blocks.append({"type": "text", "text": block.text})
+            else:
+                blocks.append({
                     "type": "toolCall",
-                    "id": b.id,
-                    "name": b.name,
-                    "arguments": b.arguments,
-                }
-            )
-            for b in message.content
-        ]
+                    "id": block.id,
+                    "name": block.name,
+                    "arguments": block.arguments,
+                })
+        data["content"] = blocks
     elif isinstance(message, ToolResultMessage):
         data["toolCallId"] = message.tool_call_id
         data["toolName"] = message.tool_name

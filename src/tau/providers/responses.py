@@ -173,7 +173,8 @@ class ResponsesBackend(HTTPBackend):
                     usage = _usage_from(_mapping(chunk.get("response")).get("usage")) or usage
                 elif kind == "response.incomplete":
                     stop_reason = "length"
-                    details = _mapping(_mapping(chunk.get("response")).get("incomplete_details"))
+                    response = _mapping(chunk.get("response"))
+                    details = _mapping(response.get("incomplete_details"))
                     if details.get("reason") == "content_filter":
                         stop_reason = "error"
                         failure_reason = "content_filter"

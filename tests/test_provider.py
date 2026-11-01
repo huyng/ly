@@ -25,6 +25,7 @@ from tau.providers import (
     ResponsesBackend,
     stream_chunk_transport,
 )
+from tau.providers.base import MissingBaseURLError
 from tau.tools import Tool
 
 
@@ -526,9 +527,14 @@ def test_base_url_precedence(monkeypatch, backend, base_url, env_url):
         monkeypatch.setenv("TAU_BASE_URL", env_url)
     monkeypatch.setenv("OPENAI_BASE_URL", "https://ignored.example/v1")
 
-    provider = backend(base_url=base_url, api_key="test-key")
-
-    assert provider.base_url == (base_url or env_url or "https://api.openai.com/v1")
+    if base_url is None and env_url is None:
+        with pytest.raises(MissingBaseURLError) as exc:
+            backend(api_key="test-key")
+        assert "TAU_BASE_URL" in str(exc.value)
+        assert exc.value.retryable is False
+    else:
+        provider = backend(base_url=base_url, api_key="test-key")
+        assert provider.base_url == (base_url or env_url)
 
 
 @pytest.mark.parametrize("backend", [ChatCompletionsBackend, ResponsesBackend])

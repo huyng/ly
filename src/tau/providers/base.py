@@ -23,7 +23,10 @@ from ..tools import Tool
 
 #: A parsed `data:` payload from the event stream.
 Chunk = Mapping[str, Any]
+ChunkStream = Iterator[Chunk]
 
+#: Status codes worth retrying: rate limits and server-side failures.
+RETRYABLE_STATUSES = frozenset({408, 409, 425, 429})
 DEFAULT_TIMEOUT = 600.0
 
 
@@ -36,7 +39,7 @@ class Transport(Protocol):
         headers: dict[str, str],
         body: bytes,
         timeout: float = ...,
-    ) -> Iterator[Chunk]: ...
+    ) -> ChunkStream: ...
 
 
 class ProviderError(RuntimeError):
@@ -64,13 +67,13 @@ class MissingCredentialsError(ProviderError):
 
     def __init__(self):
         super().__init__(
-            "Missing credentials. Set TAU_API_KEY or pass --api-key.",
-            retryable=False,
+            "Missing credentials. Set TAU_API_KEY or pass --api-key.", retryable=False
         )
 
 
-#: Status codes worth retrying: rate limits and server-side failures.
-RETRYABLE_STATUSES = frozenset({408, 409, 425, 429})
+class MissingBaseURLError(ProviderError):
+    def __init__(self):
+        super().__init__("Missing Base URL for api. Set TAU_BASE_URL", retryable=False)
 
 
 class ModelBackendProtocol(Protocol):
@@ -111,15 +114,16 @@ class HTTPBackend:
     ):
         self.model = model or os.environ.get("TAU_MODEL", "gpt-4.1")
         self.api_key = api_key or os.environ.get("TAU_API_KEY")
-        self.base_url = base_url or os.environ.get(
-            "TAU_BASE_URL", "https://api.openai.com/v1"
-        )
+        self.base_url = base_url or os.environ.get("TAU_BASE_URL", "")
         self.transport = transport or stream_chunk_transport
         self.timeout = timeout
 
         if not self.api_key:
             # Raised here, at construction, so callers fail before any work.
             raise MissingCredentialsError()
+
+        if not self.base_url:
+            raise MissingBaseURLError()
 
         # DeepSeek thinking mode requires reasoning_content to be echoed back
         # when tools are present. Other providers (e.g. z.ai) should keep the
@@ -148,7 +152,7 @@ def stream_chunk_transport(
     headers: dict[str, str],
     body: bytes,
     timeout: float = DEFAULT_TIMEOUT,
-) -> Iterator[Chunk]:
+) -> ChunkStream:
     """POST `body` and yield each SSE event's JSON payload.
 
     Lines that are not `data:` (blank separators, `:` heartbeat comments,

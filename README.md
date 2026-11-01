@@ -125,7 +125,8 @@ A session is tau's record of a conversation. The pieces mirror pi:
   `edit` or `write` (not read-only — `bash` can still write). Only its
   final report returns to the parent, so exploration does not accumulate in
   the main context. Sub-agents share the parent's provider (and therefore
-  `/model`) and its abort flag.
+  `/model`) and its abort flag. The terminal shows their tool calls live,
+  with completion/error markers, without adding child output to the parent.
 - **Compaction** — when the active branch passes a token threshold, the oldest
   turns are summarized into one message and the most recent turns are kept
   verbatim. Cuts land on user-message boundaries, so tool calls and their

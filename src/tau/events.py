@@ -65,6 +65,14 @@ class ToolExecutionEndEvent:
 
 
 @dataclass
+class TaskActivityEvent:
+    """Sub-agent tool activity for display, not the parent's conversation."""
+
+    description: str
+    event: ToolExecutionStartEvent | ToolExecutionEndEvent
+
+
+@dataclass
 class AgentEndEvent:
     """The run finished. `aborted` is True if it was interrupted."""
 
@@ -112,6 +120,7 @@ SessionEvent = (
     | MessageEndEvent
     | ToolExecutionStartEvent
     | ToolExecutionEndEvent
+    | TaskActivityEvent
     | AgentEndEvent
     | ErrorEvent
     | CompactionStartEvent

@@ -5,7 +5,12 @@ from typing import Any
 import pytest
 
 from tau.agent import AgentSession
-from tau.events import TextDeltaEvent
+from tau.events import (
+    TaskActivityEvent,
+    TextDeltaEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+)
 from tau.messages import (
     AssistantMessage,
     TextContent,
@@ -108,6 +113,46 @@ def test_task_runs_a_subagent_and_returns_only_its_report(workspace):
     assert "handler is defined in a.py:1" in tool_result.output
     assert "sub-agent: 0 tool calls" in tool_result.output
     assert not tool_result.is_error
+
+
+@pytest.mark.parametrize("path", ["a.py", "missing.py"])
+def test_subagent_activity_is_live_and_kept_out_of_parent_context(workspace, path):
+    call = ToolCall(id="child-1", name="read", arguments={"path": path})
+    session, provider = make_session(
+        workspace,
+        [
+            task_call(description="explore", prompt="find handler"),
+            AssistantMessage(
+                content=[call], model="fake", provider="fake", stop_reason="toolUse"
+            ),
+            reply("report"),
+            reply("done"),
+        ],
+    )
+    activities = []
+
+    def observe(event):
+        if isinstance(event, TaskActivityEvent):
+            # Forwarding happens during execution, before the report request.
+            assert len(provider.requests) == 2
+            activities.append(event)
+
+    session.subscribe(observe)
+    session.prompt("go")
+
+    assert [type(item.event) for item in activities] == [
+        ToolExecutionStartEvent, ToolExecutionEndEvent
+    ]
+    assert all(item.description == "explore" for item in activities)
+    assert all(item.event.tool_call == call for item in activities)
+    end = activities[-1].event
+    assert isinstance(end, ToolExecutionEndEvent)
+    assert end.result.is_error == (path == "missing.py")
+    assert not any(
+        isinstance(message, ToolResultMessage) and message.tool_call_id == call.id
+        for message in session.messages
+    )
+    assert "def handler" not in str(provider.requests[-1]["messages"])
 
 
 def test_subagent_works_in_a_fresh_context(workspace):

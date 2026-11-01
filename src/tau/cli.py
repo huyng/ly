@@ -24,6 +24,7 @@ from .events import (
     MessageEndEvent,
     MessageStartEvent,
     ReasoningDeltaEvent,
+    TaskActivityEvent,
     TextDeltaEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
@@ -105,6 +106,7 @@ class Repl:
             MessageEndEvent: self._on_message_end,
             ToolExecutionStartEvent: self._on_tool_start,
             ToolExecutionEndEvent: self._on_tool_end,
+            TaskActivityEvent: self._on_task_activity,
             ErrorEvent: self._on_error,
             CompactionStartEvent: self._on_compaction_start,
             CompactionEndEvent: self._on_compaction_end,
@@ -185,6 +187,29 @@ class Repl:
             ),
             flush=True,
         )
+
+    def _on_task_activity(self, event: TaskActivityEvent) -> None:
+        self._spinner.stop()
+        activity = event.event
+        call = activity.tool_call
+        if isinstance(activity, ToolExecutionStartEvent):
+            summary = summarize_tool_call(
+                self.theme, call.name, call.arguments, self.width - 4
+            )
+            line = self.theme.dim("→ ") + self.theme.bold(call.name)
+            if summary:
+                line += " " + summary
+        else:
+            status = (
+                self.theme.error("✗") if activity.result.is_error
+                else self.theme.dim("✓")
+            )
+            line = status + self.theme.dim(f" {call.name}")
+        print(
+            "\n".join(self.theme.dim("│  ") + part for part in line.splitlines()),
+            flush=True,
+        )
+        self._spinner.start(f"task · {event.description or 'sub-agent'} …")
 
     def _on_error(self, event: ErrorEvent) -> None:
         self._spinner.stop()

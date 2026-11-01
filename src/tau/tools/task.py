@@ -14,6 +14,7 @@ one working tree concurrently is how changes get clobbered.
 import os
 from typing import Any
 
+from ..events import TaskActivityEvent, ToolExecutionEndEvent, ToolExecutionStartEvent
 from ..messages import AssistantMessage
 from .base import Tool, ToolResult
 from .bash import BashTool
@@ -112,6 +113,14 @@ class TaskTool(Tool):
             compaction=self._parent.compaction,
             tool_guard=self._parent.tool_guard,
         )
+        label = (description or "").strip()
+        emit = self._parent._emit
+
+        def on_activity(event) -> None:
+            if isinstance(event, (ToolExecutionStartEvent, ToolExecutionEndEvent)):
+                emit(TaskActivityEvent(label, event))
+
+        sub.subscribe(on_activity)
         self.runs += 1
         outcome = sub.prompt(prompt)
         # Sub-agent spend is real spend: fold it into the parent's totals so
@@ -128,7 +137,6 @@ class TaskTool(Tool):
         report = sub.last_assistant_text().strip()
         if not report:
             report = "(the sub-agent finished without producing a final report)"
-        label = (description or "").strip()
         prefix = f"[{label}] " if label else ""
         stats = (
             f"{prefix}sub-agent: {_tool_call_count(sub)} tool calls · "

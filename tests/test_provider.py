@@ -553,6 +553,20 @@ def test_stream_that_yields_no_text_has_no_empty_text_block():
 
 
 @pytest.mark.parametrize("backend", [ChatCompletionsBackend, ResponsesBackend])
+@pytest.mark.parametrize("base_url", [None, "https://explicit.example/v1"])
+@pytest.mark.parametrize("env_url", [None, "https://tau.example/v1"])
+def test_base_url_precedence(monkeypatch, backend, base_url, env_url):
+    monkeypatch.delenv("TAU_BASE_URL", raising=False)
+    if env_url is not None:
+        monkeypatch.setenv("TAU_BASE_URL", env_url)
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://ignored.example/v1")
+
+    provider = backend(base_url=base_url, api_key="test-key")
+
+    assert provider.base_url == (base_url or env_url or "https://api.openai.com/v1")
+
+
+@pytest.mark.parametrize("backend", [ChatCompletionsBackend, ResponsesBackend])
 @pytest.mark.parametrize(
     "base_url", ["https://api.openai.com/v1", "https://api.deepseek.com"]
 )

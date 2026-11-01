@@ -98,7 +98,7 @@ class HTTPBackend:
     """Configuration and headers for one OpenAI-flavoured endpoint.
 
     Configuration precedence: explicit arguments, then TAU_* environment
-    variables, then defaults. Only the base URL falls back to OPENAI_BASE_URL.
+    variables, then defaults.
     """
 
     def __init__(
@@ -110,13 +110,10 @@ class HTTPBackend:
         timeout: float = DEFAULT_TIMEOUT,
     ):
         self.model = model or os.environ.get("TAU_MODEL", "gpt-4.1")
-        self.base_url = (
-            base_url
-            or os.environ.get("TAU_BASE_URL")
-            or os.environ.get("OPENAI_BASE_URL")
-            or "https://api.openai.com/v1"
-        )
         self.api_key = api_key or os.environ.get("TAU_API_KEY")
+        self.base_url = base_url or os.environ.get(
+            "TAU_BASE_URL", "https://api.openai.com/v1"
+        )
         self.transport = transport or stream_chunk_transport
         self.timeout = timeout
 

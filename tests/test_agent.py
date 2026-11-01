@@ -1,7 +1,7 @@
 """Tests for the tau agent harness using a scripted fake provider."""
 
 import json
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import pytest
 
@@ -57,7 +57,7 @@ class FakeProvider:
 class EchoTool(Tool):
     name = "echo"
     description = "Echo back the input."
-    parameters = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {"text": {"type": "string"}},
         "required": ["text"],
@@ -79,7 +79,7 @@ class SpyWriteTool(Tool):
 
     name = "write"
     description = "Record a write without touching the filesystem."
-    parameters = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "path": {"type": "string"},
@@ -204,7 +204,7 @@ def test_unknown_tool_records_error_result(tmp_path):
     final = session.prompt("call a missing tool")
 
     assert final.text == "recovered"
-    tool_result = [m for m in session.messages if isinstance(m, ToolResultMessage)][0]
+    tool_result = next(m for m in session.messages if isinstance(m, ToolResultMessage))
     assert tool_result.is_error
     assert "unknown tool" in tool_result.output
 
@@ -226,7 +226,7 @@ def test_invalid_argument_type_is_rejected_before_execution(tmp_path):
     session.prompt("call with a bad argument type")
 
     assert tool.calls == []  # never reached the tool
-    result = [m for m in session.messages if isinstance(m, ToolResultMessage)][0]
+    result = next(m for m in session.messages if isinstance(m, ToolResultMessage))
     assert result.is_error
     assert "invalid arguments for echo" in result.output
     assert "arguments.text must be a string (got integer)" in result.output
@@ -249,7 +249,7 @@ def test_missing_required_argument_is_rejected(tmp_path):
     session.prompt("call without the required argument")
 
     assert tool.calls == []
-    result = [m for m in session.messages if isinstance(m, ToolResultMessage)][0]
+    result = next(m for m in session.messages if isinstance(m, ToolResultMessage))
     assert result.is_error
     assert "arguments.text is required" in result.output
 
@@ -326,7 +326,7 @@ def test_interrupt_inside_a_tool_answers_every_call(tmp_path):
     class InterruptingTool(Tool):
         name = "echo"
         description = "Interrupts instead of running."
-        parameters = {
+        parameters: ClassVar[dict[str, Any]] = {
             "type": "object",
             "properties": {"text": {"type": "string"}},
             "required": ["text"],

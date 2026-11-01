@@ -3,7 +3,7 @@ parameters, and an execute method returning a ToolResult."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -15,7 +15,7 @@ class ToolResult:
 class Tool(ABC):
     name: str = ""
     description: str = ""
-    parameters: dict = {"type": "object", "properties": {}}
+    parameters: ClassVar[dict[str, Any]] = {"type": "object", "properties": {}}
 
     @abstractmethod
     def execute(self, **kwargs: Any) -> ToolResult:

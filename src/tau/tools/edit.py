@@ -1,7 +1,8 @@
 import difflib
 import os
 from dataclasses import dataclass
-from typing import Any
+from itertools import pairwise
+from typing import Any, ClassVar
 
 from .base import Tool, ToolResult
 
@@ -92,7 +93,7 @@ class EditTool(Tool):
         "not include large unchanged regions just to connect distant changes. "
         "Returns a unified diff of what changed."
     )
-    parameters = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Path to the file to edit"},
@@ -170,7 +171,7 @@ class EditTool(Tool):
             regions.append(_Region(start, start + len(old), edit["newText"], index))
 
         ordered = sorted(regions, key=lambda r: (r.start, r.end))
-        for previous, current in zip(ordered, ordered[1:]):
+        for previous, current in pairwise(ordered):
             if current.start < previous.end:
                 return ToolResult(
                     f"Error: edits[{previous.index}] and edits[{current.index}] overlap in "
@@ -198,7 +199,7 @@ class WriteTool(Tool):
         "Write content to a file. Creates the file if it doesn't exist, "
         "overwrites if it does. Automatically creates parent directories."
     )
-    parameters = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Path to the file to write"},

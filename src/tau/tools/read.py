@@ -1,6 +1,6 @@
 import os
 import stat
-from typing import Any
+from typing import Any, ClassVar
 
 from .base import Tool, ToolResult
 
@@ -15,7 +15,7 @@ class ReadTool(Tool):
         f"Read the contents of a text file. Output is truncated to {MAX_LINES} lines "
         "or 50KB (whichever is hit first). Use offset/limit for large files."
     )
-    parameters = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Path to the file (relative or absolute)"},

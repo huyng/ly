@@ -19,7 +19,7 @@ import os
 import re
 from collections.abc import Iterator
 from pathlib import Path, PurePath
-from typing import Any
+from typing import Any, ClassVar
 
 from .base import Tool, ToolResult
 
@@ -191,7 +191,7 @@ class GrepTool(Tool):
         "rg or grep through `bash`: results are compact and cannot flood the "
         "transcript. Narrow with `glob` or `path` when output is truncated."
     )
-    parameters = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "pattern": {
@@ -310,7 +310,7 @@ class GlobTool(Tool):
         "it skips .git, node_modules, .venv, and build output, and returns paths "
         "relative to the working directory."
     )
-    parameters = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "pattern": {

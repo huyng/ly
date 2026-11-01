@@ -3,7 +3,7 @@ import re
 import signal
 import subprocess
 import tempfile
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, ClassVar
 
 from .base import Tool, ToolResult
 
@@ -95,7 +95,7 @@ class BashTool(Tool):
         f"stdout and stderr; output is truncated to the last {MAX_OUTPUT_LINES} "
         f"lines or {MAX_OUTPUT_BYTES // 1024}KB (whichever is hit first)."
     )
-    parameters = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "command": {"type": "string", "description": "Shell command to execute"},

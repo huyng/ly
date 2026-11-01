@@ -433,5 +433,5 @@ class AgentSession:
             return tool.execute(**call.arguments)
         except TypeError as exc:
             return ToolResult(output=f"Error: bad arguments for {call.name}: {exc}", is_error=True)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — tool failures must reach the model
             return ToolResult(output=f"Error executing {call.name}: {exc}", is_error=True)

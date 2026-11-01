@@ -242,7 +242,7 @@ def _complete(provider, request: str, abort_event) -> AssistantMessage:
         except StopIteration as stop:
             message = stop.value
             if not isinstance(message, AssistantMessage):  # defensive
-                raise RuntimeError("provider did not return an assistant message")
+                raise TypeError("provider did not return an assistant message")
             return message
 
 

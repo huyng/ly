@@ -12,7 +12,7 @@ one working tree concurrently is how changes get clobbered.
 """
 
 import os
-from typing import Any
+from typing import Any, ClassVar
 
 from ..events import TaskActivityEvent, ToolExecutionEndEvent, ToolExecutionStartEvent
 from ..messages import AssistantMessage
@@ -53,7 +53,7 @@ class TaskTool(Tool):
         "read, search and run shell commands, but cannot edit files, and it "
         "cannot ask you questions, so the prompt must stand on its own."
     )
-    parameters = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "description": {

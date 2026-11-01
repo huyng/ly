@@ -39,7 +39,7 @@ def create_agent_session(
     from .providers import make_provider
 
     provider = make_provider(api=api, model=model, base_url=base_url, api_key=api_key)
-    in_memory = False if persistent else True
+    in_memory = not persistent
     session_manager = SessionManager(in_memory=in_memory)
     return AgentSession(
         provider=provider,

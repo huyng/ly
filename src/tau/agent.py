@@ -39,7 +39,7 @@ from .messages import (
     UserMessage,
 )
 from .policy import basic_guard
-from .providers import Provider, ProviderError
+from .providers import ModelBackendProtocol, ProviderError
 from .session import SessionManager
 from .tools import Tool, ToolResult, validate_arguments
 
@@ -56,7 +56,7 @@ class AgentSession:
 
     def __init__(
         self,
-        provider: Provider,
+        provider: ModelBackendProtocol,
         tools: list[Tool],
         session_manager: SessionManager,
         system_prompt: str,
@@ -191,7 +191,8 @@ class AgentSession:
             asst_message = AssistantMessage(
                 content=[],
                 model=self.provider.model,
-                provider=self.provider.name,
+                api=self.provider.api,
+                provider=self.provider.provider,
                 stop_reason="aborted",
             )
             self.session_manager.append(asst_message)
@@ -340,7 +341,8 @@ class AgentSession:
         error = AssistantMessage(
             content=[],
             model=self.provider.model,
-            provider=self.provider.name,
+            api=self.provider.api,
+            provider=self.provider.provider,
             stop_reason="error",
             error_message=str(last_error),
         )

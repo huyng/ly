@@ -17,7 +17,8 @@ from tau.theme import Theme
 
 
 class FakeProvider:
-    name = "fake"
+    api = "fake"
+    provider = "fake"
     model = "fake-model"
 
     def stream(self, *_args, **_kwargs):

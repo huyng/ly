@@ -19,8 +19,8 @@ from tau.messages import (
     serialize_message,
 )
 from tau.providers import (
+    ChatCompletionsBackend,
     MissingCredentialsError,
-    OpenAIProvider,
     ProviderError,
     stream_chunk_transport,
 )
@@ -72,9 +72,9 @@ def collect(provider, messages):
             return events, stop.value
 
 
-def make_provider(chunks, model="deepseek-flash") -> tuple[OpenAIProvider, FakeTransport]:
+def make_provider(chunks, model="deepseek-flash") -> tuple[ChatCompletionsBackend, FakeTransport]:
     transport = FakeTransport(chunks)
-    provider = OpenAIProvider(
+    provider = ChatCompletionsBackend(
         model=model,
         base_url="https://api.deepseek.com",
         api_key="test-key",
@@ -94,7 +94,7 @@ class NoopTool(Tool):
         raise NotImplementedError
 
 
-def body_with_tools(provider: OpenAIProvider) -> dict[str, Any]:
+def body_with_tools(provider: ChatCompletionsBackend) -> dict[str, Any]:
     """The request body tau would send for one turn that has tools."""
     return json.loads(provider._request_body("system", [], [NoopTool()]))
 
@@ -139,7 +139,7 @@ def test_reasoning_is_streamed_stored_and_sent_back():
 
 
 def test_reasoning_is_not_sent_to_non_deepseek_providers():
-    provider = OpenAIProvider(
+    provider = ChatCompletionsBackend(
         model="glm-4.6",
         base_url="https://api.z.ai/api/paas/v4/",
         api_key="test-key",
@@ -159,7 +159,7 @@ def test_reasoning_is_not_sent_to_non_deepseek_providers():
 
 def test_reasoning_passthrough_can_be_forced_with_env(monkeypatch):
     monkeypatch.setenv("TAU_PASS_REASONING_CONTENT", "1")
-    provider = OpenAIProvider(
+    provider = ChatCompletionsBackend(
         model="glm-4.6",
         base_url="https://api.z.ai/api/paas/v4/",
         api_key="test-key",
@@ -404,6 +404,35 @@ def test_request_includes_tool_schemas_when_present():
     assert transport.body["tools"][0]["function"]["name"] == "noop"
 
 
+@pytest.mark.parametrize(("url", "service"), [
+    ("https://api.openai.com/v1", "openai"),
+    ("https://api.deepseek.com", "deepseek"),
+    ("https://api.z.ai/api/paas/v4", "zai"),
+    ("https://proxy.example/v1", "proxy.example"),
+    ("https://proxy.example/deepseek", "proxy.example"),
+])
+def test_response_records_api_and_service(url, service):
+    backend = ChatCompletionsBackend(
+        base_url=url, api_key="test", transport=FakeTransport([chunk(content="ok")]),
+    )
+    _, message = collect(backend, [])
+
+    assert message.api == "openai-completions"
+    assert message.provider == service
+    assert message.model == backend.model
+
+
+def test_service_identifier_can_be_explicit():
+    backend = ChatCompletionsBackend(
+        base_url="https://proxy.example/v1", api_key="test", provider="my-service",
+        transport=FakeTransport([]),
+    )
+    _, message = collect(backend, [])
+
+    assert message.provider == "my-service"
+    assert message.api == "openai-completions"
+
+
 def test_request_omits_reasoning_effort_by_default(monkeypatch):
     monkeypatch.setenv("TAU_REASONING_EFFORT", "  ")
     provider, transport = make_provider([chunk(content="ok")])
@@ -494,7 +523,7 @@ def test_reasoning_from_finished_turns_is_not_sent_back():
 
 
 def test_request_omits_an_assistant_message_with_no_content():
-    provider = OpenAIProvider(
+    provider = ChatCompletionsBackend(
         model="deepseek-flash",
         base_url="https://api.deepseek.com",
         api_key="test-key",
@@ -523,7 +552,7 @@ def test_missing_credentials_raise_at_construction(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
     with pytest.raises(MissingCredentialsError):
-        OpenAIProvider(model="m", base_url="https://api.openai.com/v1")
+        ChatCompletionsBackend(model="m", base_url="https://api.openai.com/v1")
 
 
 def test_deepseek_key_is_only_used_for_deepseek_urls(monkeypatch):
@@ -531,11 +560,11 @@ def test_deepseek_key_is_only_used_for_deepseek_urls(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-key")
 
-    deepseek = OpenAIProvider(base_url="https://api.deepseek.com")
+    deepseek = ChatCompletionsBackend(base_url="https://api.deepseek.com")
     assert deepseek.api_key == "ds-key"
 
     with pytest.raises(MissingCredentialsError):
-        OpenAIProvider(base_url="https://api.openai.com/v1")
+        ChatCompletionsBackend(base_url="https://api.openai.com/v1")
 
 
 def test_abort_mid_stream_closes_transport_and_reports_aborted():
@@ -553,7 +582,7 @@ def test_abort_mid_stream_closes_transport_and_reports_aborted():
                 self.closed = True
 
     transport = AbortingTransport([])
-    provider = OpenAIProvider(model="m", api_key="k", transport=transport)
+    provider = ChatCompletionsBackend(model="m", api_key="k", transport=transport)
     stream = provider.stream("system", [UserMessage(content="hi")], [], abort_event=abort)
 
     events = []

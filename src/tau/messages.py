@@ -73,6 +73,7 @@ class AssistantMessage:
     model: str
     provider: str
 
+    api: str = ""
     stop_reason: str = "stop"  # stop | toolUse | length | error | aborted
     usage: Usage = field(default_factory=Usage)
     error_message: str | None = None
@@ -116,6 +117,7 @@ def serialize_message(message: AgentMessage) -> dict[str, Any]:
     elif isinstance(message, AssistantMessage):
         data["model"] = message.model
         data["provider"] = message.provider
+        data["api"] = message.api
         data["stopReason"] = message.stop_reason
         data["usage"] = {
             "input": message.usage.input,
@@ -167,6 +169,11 @@ def deserialize_message(data: dict[str, Any]) -> AgentMessage:
             content=content,
             model=data["model"],
             provider=data["provider"],
+            # Legacy logs used adapter names as providers, not service identities.
+            api=data.get("api", {
+                "openai": "openai-completions",
+                "openai-responses": "openai-responses",
+            }.get(data["provider"], "")),
             stop_reason=data["stopReason"],
             usage=Usage(
                 input=data["usage"]["input"],

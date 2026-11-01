@@ -3,7 +3,7 @@
 The backends differ in how they shape a request and how they read the stream,
 so each lives in its own module. What they share is an endpoint's configuration
 (model, base URL, key, timeout), its headers, and the wire-level POST that
-turns a body into SSE chunks — that is `HTTPProvider` and
+turns a body into SSE chunks — that is `HTTPBackend` and
 `stream_chunk_transport` here.
 """
 
@@ -12,6 +12,7 @@ import json
 import os
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Generator, Iterator, Mapping
 from contextlib import closing
@@ -72,7 +73,7 @@ class MissingCredentialsError(ProviderError):
 RETRYABLE_STATUSES = frozenset({408, 409, 425, 429})
 
 
-class Provider(Protocol):
+class ModelBackendProtocol(Protocol):
     """What the agent needs from a model runtime; the backends implement it.
 
     Tests and other hosts can satisfy it with a stand-in instead of a real
@@ -81,7 +82,8 @@ class Provider(Protocol):
     retryability; unexpected implementation errors propagate without retries.
     """
 
-    name: str
+    api: str
+    provider: str
     model: str
 
     def stream(
@@ -93,23 +95,27 @@ class Provider(Protocol):
     ) -> Generator[ProviderEvent, None, AssistantMessage]: ...
 
 
-class HTTPProvider:
+class HTTPBackend:
     """Configuration and headers for one OpenAI-flavoured endpoint.
 
     Configuration precedence: explicit arguments, then TAU_* environment
     variables, then OPENAI_* environment variables, then defaults.
     """
 
-    name = "openai"
-
     def __init__(self, model: str | None = None, base_url: str | None = None,
                  api_key: str | None = None, transport: Transport | None = None,
-                 timeout: float = DEFAULT_TIMEOUT):
+                 timeout: float = DEFAULT_TIMEOUT, provider: str | None = None):
         self.model = model or os.environ.get("TAU_MODEL", "gpt-4.1")
         self.base_url = (
             base_url or os.environ.get("TAU_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
             or "https://api.openai.com/v1"
         )
+        hostname = urllib.parse.urlsplit(self.base_url).hostname or ""
+        self.provider = provider or {
+            "api.openai.com": "openai",
+            "api.deepseek.com": "deepseek",
+            "api.z.ai": "zai",
+        }.get(hostname, hostname)
         api_key = api_key or os.environ.get("TAU_API_KEY")
         if "deepseek" in self.base_url:
             api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")

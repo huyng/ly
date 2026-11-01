@@ -21,15 +21,17 @@ from ..messages import (
 )
 from ..tools import Tool
 from .base import (
-    HTTPProvider,
+    HTTPBackend,
     ProviderError,
     _as_int,
     _close_stream,
 )
 
 
-class OpenAIProvider(HTTPProvider):
+class ChatCompletionsBackend(HTTPBackend):
     """Streaming provider for any OpenAI-compatible chat-completions endpoint."""
+
+    api = "openai-completions"
 
     # -- request construction ------------------------------------------------
 
@@ -43,10 +45,11 @@ class OpenAIProvider(HTTPProvider):
         # for finished turns is dead weight — no model reads it again, and it was
         # ~40% of all input tokens. Dropping the earlier blocks also leaves the
         # request prefix stable enough for provider-side caching.
-        in_flight = max(
-            (index for index, m in enumerate(messages) if isinstance(m, AssistantMessage)),
-            default=-1,
-        )
+        in_flight = -1
+        for index in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[index], AssistantMessage):
+                in_flight = index
+                break
         for index, message in enumerate(messages):
             if isinstance(message, UserMessage):
                 request.append({"role": "user", "content": message.content})
@@ -237,7 +240,8 @@ class OpenAIProvider(HTTPProvider):
         return AssistantMessage(
             content=content,
             model=self.model,
-            provider=self.name,
+            api=self.api,
+            provider=self.provider,
             stop_reason="aborted" if aborted else stop_reason,
             usage=usage,
             error_message=failure_reason,

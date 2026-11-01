@@ -6,7 +6,7 @@ outright, so those models are reachable only through ``/v1/responses``. Both
 the request (input items, flat tool schemas, ``instructions``) and the stream
 (named events instead of ``choices[0].delta``) differ from chat-completions,
 which is why this is a backend of its own rather than a branch in
-``chat.OpenAIProvider``.
+``chat.ChatCompletionsBackend``.
 """
 
 import json
@@ -26,13 +26,13 @@ from ..messages import (
     UserMessage,
 )
 from ..tools import Tool
-from .base import HTTPProvider, ProviderError, _as_int, _close_stream
+from .base import HTTPBackend, ProviderError, _as_int, _close_stream
 
 
-class ResponsesProvider(HTTPProvider):
+class ResponsesBackend(HTTPBackend):
     """Streaming provider for OpenAI's /v1/responses endpoint."""
 
-    name = "openai-responses"
+    api = "openai-responses"
 
     # -- request construction ------------------------------------------------
 
@@ -221,7 +221,8 @@ class ResponsesProvider(HTTPProvider):
         return AssistantMessage(
             content=content,
             model=self.model,
-            provider=self.name,
+            api=self.api,
+            provider=self.provider,
             stop_reason="aborted" if aborted else stop_reason,
             usage=usage,
             error_message=failure_reason,

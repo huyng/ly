@@ -31,7 +31,8 @@ class FakeProvider:
     between the parent's tool call and the parent's next turn.
     """
 
-    name = "fake"
+    api = "fake"
+    provider = "fake"
 
     def __init__(self, turns: list[AssistantMessage]):
         self.turns = list(turns)

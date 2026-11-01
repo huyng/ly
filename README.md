@@ -108,7 +108,10 @@ A session is tau's record of a conversation. The pieces mirror pi:
 - **Sessions** — append-only JSONL under `~/.tau/sessions/<date>/` (override
   with `TAU_SESSIONS_DIR`). Each entry has an id and a parent, so history forms
   a tree whose active branch supplies model context (pointer lines record the
-  active leaf).
+  active leaf). Assistant messages record `api` (wire format), `provider`
+  (service), and `model` separately. Backends identify common services from the
+  endpoint hostname; custom endpoints use their hostname unless a `provider=`
+  identifier is passed to the backend constructor.
 - **System prompt** — base instructions plus `AGENTS.md` files: the user's
   `~/.agents/AGENTS.md` and the nearest one discovered from the working
   directory upward. When both exist the prompt names both and their

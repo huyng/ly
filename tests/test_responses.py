@@ -13,7 +13,7 @@ from tau.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from tau.providers import ProviderError, ResponsesProvider, make_provider
+from tau.providers import ProviderError, ResponsesBackend, make_provider
 from tau.tools import Tool
 
 
@@ -44,9 +44,9 @@ class NoopTool(Tool):
         raise NotImplementedError
 
 
-def make_provider_for(chunks, *, model="gpt-6.1-sol") -> tuple[ResponsesProvider, FakeTransport]:
+def make_provider_for(chunks, *, model="gpt-6.1-sol") -> tuple[ResponsesBackend, FakeTransport]:
     transport = FakeTransport(chunks)
-    provider = ResponsesProvider(
+    provider = ResponsesBackend(
         model=model,
         base_url="https://api.openai.com/v1",
         api_key="test-key",
@@ -88,6 +88,8 @@ def test_text_deltas_accumulate_and_usage_is_mapped():
 
     assert "".join(e.delta for e in events if isinstance(e, TextDeltaEvent)) == "Hello"
     assert message.text == "Hello"
+    assert message.api == "openai-responses"
+    assert message.provider == "openai"
     assert message.stop_reason == "stop"
     assert message.usage.input == 11
     assert message.usage.output == 4
@@ -347,10 +349,10 @@ def test_make_provider_picks_the_backend(monkeypatch, api, expected):
     monkeypatch.delenv("TAU_API", raising=False)
     provider = make_provider(api=api, model="m", api_key="test-key")
 
-    assert isinstance(provider, ResponsesProvider) is (expected == "responses")
+    assert isinstance(provider, ResponsesBackend) is (expected == "responses")
 
 
 def test_make_provider_honours_tau_api(monkeypatch):
     monkeypatch.setenv("TAU_API", "responses")
 
-    assert isinstance(make_provider(model="m", api_key="test-key"), ResponsesProvider)
+    assert isinstance(make_provider(model="m", api_key="test-key"), ResponsesBackend)

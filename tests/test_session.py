@@ -93,6 +93,41 @@ def test_message_timestamp_round_trip(message, monkeypatch):
     assert deserialize_message(saved).timestamp == 999
 
 
+def test_assistant_metadata_round_trip(tmp_path):
+    manager = SessionManager(directory=tmp_path)
+    manager.new_session()
+    message = AssistantMessage(
+        content=[], model="model", api="openai-responses", provider="deepseek",
+    )
+    manager.append(message)
+    assert manager.file is not None
+
+    restored = SessionManager(directory=tmp_path)
+    restored.load(manager.file)
+    assert restored.active_branch() == [message]
+
+
+@pytest.mark.parametrize(("provider", "api"), [
+    ("openai", "openai-completions"),
+    ("openai-responses", "openai-responses"),
+    ("fake", ""),
+])
+def test_legacy_assistant_metadata_loads(tmp_path, provider, api):
+    message = AssistantMessage(content=[], model="model", provider=provider)
+    saved = serialize_message(message)
+    saved.pop("api")
+    path = touch(tmp_path / "legacy.jsonl", [json.dumps({
+        "id": "message", "parent": None, "message": saved,
+    }), json.dumps({"current": "message"})])
+    manager = SessionManager(directory=tmp_path)
+    manager.load(path)
+    restored = manager.active_branch()[0]
+
+    assert isinstance(restored, AssistantMessage)
+    assert restored.api == api
+    assert restored.provider == provider
+
+
 def test_active_branch_preserves_timestamps(monkeypatch):
     manager = SessionManager(in_memory=True)
     message = UserMessage("hello")

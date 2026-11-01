@@ -35,7 +35,8 @@ from tau.session import SessionManager
 
 
 class FakeProvider:
-    name = "fake"
+    api = "fake"
+    provider = "fake"
 
     def __init__(self, turns: list[AssistantMessage]):
         self.turns = list(turns)

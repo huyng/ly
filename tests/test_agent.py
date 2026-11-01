@@ -24,7 +24,7 @@ from tau.messages import (
     Usage,
     UserMessage,
 )
-from tau.providers import OpenAIProvider, ProviderError, ResponsesProvider
+from tau.providers import ChatCompletionsBackend, ProviderError, ResponsesBackend
 from tau.session import SessionManager
 from tau.tools import Tool, ToolResult
 from tau.tools.task import TaskTool
@@ -33,7 +33,8 @@ from tau.tools.task import TaskTool
 class FakeProvider:
     """Scripts a sequence of turns: each turn is an AssistantMessage."""
 
-    name = "fake"
+    api = "fake"
+    provider = "fake"
 
     def __init__(self, turns: list[AssistantMessage]):
         self.turns = list(turns)
@@ -364,7 +365,8 @@ def test_interrupt_inside_a_tool_answers_every_call(tmp_path):
 
 def test_abort_during_retry_stops_without_another_request(tmp_path):
     class FailingProvider:
-        name = "fake"
+        api = "fake"
+        provider = "fake"
         model = "fake-model"
 
         def __init__(self):
@@ -390,6 +392,8 @@ def test_abort_during_retry_stops_without_another_request(tmp_path):
     final = session.prompt("hi")
 
     assert final.stop_reason == "aborted"
+    assert final.api == "fake"
+    assert final.provider == "fake"
     assert provider.calls == 1
 
 
@@ -397,7 +401,8 @@ def test_permanent_error_is_not_retried(tmp_path):
     """A 401 must fail once, immediately — not three times over 3 seconds."""
 
     class UnauthorizedProvider:
-        name = "fake"
+        api = "fake"
+        provider = "fake"
         model = "fake-model"
 
         def __init__(self):
@@ -432,7 +437,8 @@ def test_transient_error_is_retried(tmp_path, monkeypatch):
     monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
 
     class FlakyProvider:
-        name = "fake"
+        api = "fake"
+        provider = "fake"
         model = "fake-model"
 
         def __init__(self):
@@ -454,6 +460,8 @@ def test_transient_error_is_retried(tmp_path, monkeypatch):
 
     assert provider.calls == 3
     assert final.stop_reason == "error"
+    assert final.api == "fake"
+    assert final.provider == "fake"
     assert "503" in (final.error_message or "")
 
 
@@ -463,7 +471,8 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
     monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
 
     class FlakyProvider:
-        name = "fake"
+        api = "fake"
+        provider = "fake"
         model = "fake-model"
 
         def __init__(self):
@@ -517,7 +526,8 @@ def test_create_agent_session_binds_tools_to_the_requested_cwd(tmp_path, monkeyp
 
 def failing_provider(reason, *, retryable=False):
     class Provider:
-        name = "fake"
+        api = "fake"
+        provider = "fake"
         model = "fake-model"
 
         def __init__(self):
@@ -655,7 +665,7 @@ def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
                 "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
             }}
 
-    provider_type = OpenAIProvider if api == "chat" else ResponsesProvider
+    provider_type = ChatCompletionsBackend if api == "chat" else ResponsesBackend
     provider = provider_type(api_key="test", transport=transport)
     session = AgentSession(
         provider=provider, tools=[], session_manager=SessionManager(in_memory=True),

@@ -383,22 +383,13 @@ def test_tool_schemas_are_flat_on_requests():
     ]
 
 
-def test_reasoning_effort_travels_as_a_reasoning_object(monkeypatch):
+def test_reasoning_summary_uses_default_effort(monkeypatch):
     monkeypatch.setenv("TAU_REASONING_EFFORT", "high")
     provider, transport = make_provider_for([])
 
     collect(provider, [UserMessage(content="hi")])
 
-    assert transport.body["reasoning"] == {"effort": "high", "summary": "auto"}
-
-
-def test_no_reasoning_object_by_default(monkeypatch):
-    monkeypatch.delenv("TAU_REASONING_EFFORT", raising=False)
-    provider, transport = make_provider_for([])
-
-    collect(provider, [UserMessage(content="hi")])
-
-    assert "reasoning" not in transport.body
+    assert transport.body["reasoning"] == {"summary": "auto"}
 
 
 # -- backend selection -------------------------------------------------------

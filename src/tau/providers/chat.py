@@ -119,8 +119,6 @@ class ChatCompletionsBackend(HTTPBackend):
         # empty array where a missing key is fine.
         if tools:
             body["tools"] = self._tool_schemas(tools)
-        if self.reasoning_effort:
-            body["reasoning_effort"] = self.reasoning_effort
         return json.dumps(body).encode("utf-8")
 
     # -- streaming ------------------------------------------------------------

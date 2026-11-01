@@ -134,13 +134,6 @@ class HTTPBackend:
                 "off",
             )
 
-        # Off by default: the endpoint picks the effort. Some endpoints refuse
-        # reasoning_effort alongside function tools on chat-completions and want
-        # "none" (or /v1/responses, which tau speaks via `responses`).
-        self.reasoning_effort = (
-            os.environ.get("TAU_REASONING_EFFORT", "").strip() or None
-        )
-
     def _headers(self) -> dict[str, str]:
         return {
             "Authorization": f"Bearer {self.api_key}",

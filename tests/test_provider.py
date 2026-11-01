@@ -433,46 +433,11 @@ def test_response_records_api_and_model():
     assert message.model == backend.model
 
 
-def test_request_omits_reasoning_effort_by_default(monkeypatch):
-    monkeypatch.setenv("TAU_REASONING_EFFORT", "  ")
-    provider, transport = make_provider([chunk(content="ok")])
-
-    collect(provider, [UserMessage(content="hi")])
-
-    assert "reasoning_effort" not in transport.body
-
-
-def test_reasoning_effort_can_be_set_with_env(monkeypatch):
-    monkeypatch.setenv("TAU_REASONING_EFFORT", "none")
-    provider, transport = make_provider([chunk(content="ok")])
-
-    collect(provider, [UserMessage(content="hi")])
-
-    assert transport.body["reasoning_effort"] == "none"
-
-
-@pytest.mark.parametrize("model", ["gpt-5.6-luna", "gpt-6.1-sol", "gpt-6-astra"])
-def test_reasoning_effort_is_not_inferred_from_model(monkeypatch, model):
-    monkeypatch.delenv("TAU_REASONING_EFFORT", raising=False)
-    provider, _ = make_provider([], model=model)
+def test_request_omits_reasoning_effort(monkeypatch):
+    monkeypatch.setenv("TAU_REASONING_EFFORT", "high")
+    provider, _ = make_provider([])
 
     assert "reasoning_effort" not in body_with_tools(provider)
-
-
-def test_none_effort_is_not_forced_without_tools(monkeypatch):
-    monkeypatch.delenv("TAU_REASONING_EFFORT", raising=False)
-    provider, _ = make_provider([], model="gpt-5.6-luna")
-
-    body = json.loads(provider._request_body("system", [], []))
-
-    assert "reasoning_effort" not in body
-
-
-def test_explicit_reasoning_effort_is_preserved_with_tools(monkeypatch):
-    monkeypatch.setenv("TAU_REASONING_EFFORT", "high")
-    provider, _ = make_provider([], model="gpt-5.6-luna")
-
-    assert body_with_tools(provider)["reasoning_effort"] == "high"
 
 
 def test_tool_call_deltas_accumulate_across_chunks():

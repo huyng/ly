@@ -70,7 +70,6 @@ speaks when asked (`--api responses` or `TAU_API=responses`):
 ```bash
 export TAU_API=responses
 export TAU_MODEL=gpt-6.1-sol
-export TAU_REASONING_EFFORT=medium   # optional; the model's default otherwise
 ```
 
 tau does not read `reasoning_content` off this endpoint; reasoning arrives as

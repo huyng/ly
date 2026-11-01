@@ -87,6 +87,8 @@ class ResponsesBackend(HTTPBackend):
             "stream": True,
             # tau owns the transcript, so nothing needs keeping server-side.
             "store": False,
+            # Request summaries so reasoning text appears on the stream.
+            "reasoning": {"summary": "auto"},
         }
         if tools:
             # Flat on Responses: no `function` wrapper around the schema.
@@ -99,12 +101,6 @@ class ResponsesBackend(HTTPBackend):
                 }
                 for tool in tools
             ]
-        # `summary: auto` is what puts reasoning text on the stream at all.
-        if self.reasoning_effort:
-            body["reasoning"] = {
-                "effort": self.reasoning_effort,
-                "summary": "auto",
-            }
         return json.dumps(body).encode("utf-8")
 
     # -- streaming ------------------------------------------------------------

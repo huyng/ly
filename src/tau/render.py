@@ -316,25 +316,22 @@ def render_tool_result(
 ) -> str:
     """Render a tool result as a compact, optionally multi-line block."""
     width = width or terminal_width()
-    duration = theme.dim(format_duration(elapsed))
+    duration = format_duration(elapsed)
+    status = (
+        theme.error("✗") + theme.dim(f" error {duration} ↓")
+        if is_error else theme.success("✓") + theme.dim(f" done {duration} ↓")
+    )
+    head = theme.dim("├─ ") + status
+    foot = "\n" + theme.dim("╰─")
     lines = output.strip().splitlines()
-    first = lines[0] if lines else ""
 
     if is_error:
-        head = (
-            theme.dim("╰─ ")
-            + theme.error("✗")
-            + theme.dim(" ")
-            + duration
-            + theme.dim(" · ")
-            + theme.error(_shorten(first, width - 14))
-        )
         body = "\n".join(
-            theme.dim("│ " + _shorten(line, width - 2)) for line in lines[1:6]
+            theme.dim("│ " + _shorten(line, width - 2)) for line in lines[:6]
         )
         if len(lines) > 6:
             body += "\n" + theme.dim(f"│ … {len(lines) - 6} more lines")
-        return head + (("\n" + body) if body else "")
+        return head + (("\n" + body) if body else "") + foot
 
     summary, separator, diff = output.partition("\n\n")
 
@@ -350,12 +347,8 @@ def render_tool_result(
             for line in diff_lines
             if line.startswith("-") and not line.startswith("---")
         )
-        head = (
-            theme.dim("╰─ ")
-            + theme.success("✓")
-            + theme.dim(" ")
-            + duration
-            + theme.dim(" · ")
+        counts = (
+            theme.dim("│ ")
             + theme.add(f"+{additions}")
             + theme.dim(" ")
             + theme.remove(f"−{deletions}")
@@ -366,61 +359,36 @@ def render_tool_result(
         )
         if len(diff_lines) > MAX_DIFF_LINES:
             body += "\n" + theme.dim(f"│ … {len(diff_lines) - MAX_DIFF_LINES} more lines")
-        return head + "\n" + body
+        return head + "\n" + counts + "\n" + body + foot
 
     if name == "read":
         count = len(output.splitlines())
-        return (
-            theme.dim("╰─ ")
-            + theme.success("✓")
-            + theme.dim(" ")
-            + duration
-            + theme.dim(f" · {count} lines")
-        )
+        return head + "\n" + theme.dim(f"│ {count} lines") + foot
 
     if name == "bash":
         exit_note = ""
         if lines and lines[-1].startswith("[exit code:"):
-            exit_note = " · " + lines.pop()
-            exit_note = theme.dim(exit_note)
-        head = (
-            theme.dim("╰─ ")
-            + theme.success("✓")
-            + theme.dim(" ")
-            + duration
-            + exit_note
-        )
+            exit_note = lines.pop()
         preview = lines[:MAX_PREVIEW_LINES]
         body = "\n".join(
             theme.dim("│ " + _shorten(line, width - 2)) for line in preview
         )
         if len(lines) > MAX_PREVIEW_LINES:
             body += "\n" + theme.dim(f"│ … {len(lines) - MAX_PREVIEW_LINES} more lines")
-        return head + (("\n" + body) if body else "")
+        if exit_note:
+            body += ("\n" if body else "") + theme.dim("│ " + exit_note)
+        return head + (("\n" + body) if body else "") + foot
 
     if name == "write":
-        return (
-            theme.dim("╰─ ")
-            + theme.success("✓")
-            + theme.dim(" ")
-            + duration
-            + theme.dim(" · ")
-            + theme.dim(_shorten(summary, width - 16))
-        )
+        return head + "\n" + theme.dim("│ " + _shorten(summary, width - 2)) + foot
 
-    head = (
-        theme.dim("╰─ ")
-        + theme.success("✓")
-        + theme.dim(" ")
-        + duration
-    )
     preview = lines[:6]
     body = "\n".join(
         theme.dim("│ " + _shorten(line, width - 2)) for line in preview
     )
     if len(lines) > 6:
         body += "\n" + theme.dim(f"│ … {len(lines) - 6} more lines")
-    return head + (("\n" + body) if body else "")
+    return head + (("\n" + body) if body else "") + foot
 
 
 def colorize_diff_line(theme: Theme, line: str) -> str:

@@ -159,7 +159,35 @@ def test_bash_call_prints_the_whole_script():
 def test_bash_result_shows_preview_and_exit_code():
     out = render_tool_result(Theme(False), "bash", "hello\nworld\n[exit code: 0]", False, 1.2)
     assert "hello" in out
-    assert "[exit code: 0]" in out
+    assert out == (
+        "├─ ✓ done 1.2s ↓\n│ hello\n│ world\n│ [exit code: 0]\n╰─"
+    )
+
+
+def test_tool_result_status_and_output_frame():
+    for name in ("bash", "read", "write", "grep", "edit"):
+        for is_error, status in ((False, "✓ done"), (True, "✗ error")):
+            out = render_tool_result(Theme(False), name, "hello", is_error, 1.4)
+            assert out.startswith(f"├─ {status} 1.4s ↓\n│ ")
+            assert out.endswith("\n╰─")
+            assert "\x1b[" not in out
+
+
+def test_tool_result_status_colors():
+    for is_error, status, color in (
+        (False, "✓ done", "\x1b[32m"),
+        (True, "✗ error", "\x1b[31m"),
+    ):
+        out = render_tool_result(Theme(True), "bash", "hello", is_error, 1.4)
+        glyph, label = status.split()
+        assert f"{color}{glyph}\x1b[0m" in out
+        assert f"\x1b[2m {label} 1.4s ↓\x1b[0m" in out
+
+
+def test_empty_tool_result_closes_frame():
+    for is_error in (False, True):
+        out = render_tool_result(Theme(False), "bash", "", is_error, 1.4)
+        assert out.splitlines()[1:] == ["╰─"]
 
 
 def test_read_result_is_summarized_not_dumped():

@@ -7,7 +7,15 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from tau.messages import UserMessage
+import pytest
+
+from tau.messages import (
+    AssistantMessage,
+    ToolResultMessage,
+    UserMessage,
+    deserialize_message,
+    serialize_message,
+)
 from tau.session import SessionManager
 
 
@@ -68,6 +76,32 @@ def test_round_trip_reload(tmp_path):
     assert len(branch) == 1
     assert isinstance(branch[0], UserMessage)
     assert branch[0].content == "hello"
+
+
+@pytest.mark.parametrize("message", [
+    UserMessage("hello"),
+    AssistantMessage(content=[], model="fake", provider="fake"),
+    ToolResultMessage(tool_call_id="call", tool_name="read", output="hello"),
+])
+def test_message_timestamp_round_trip(message, monkeypatch):
+    monkeypatch.setattr("tau.messages.time.time", lambda: 0.999)
+    message.timestamp = 123
+    saved = serialize_message(message)
+
+    assert deserialize_message(saved).timestamp == 123
+    saved.pop("timestamp")
+    assert deserialize_message(saved).timestamp == 999
+
+
+def test_active_branch_preserves_timestamps(monkeypatch):
+    manager = SessionManager(in_memory=True)
+    message = UserMessage("hello")
+    message.timestamp = 123
+    manager.append(message)
+    monkeypatch.setattr("tau.messages.time.time", lambda: 0.999)
+
+    assert manager.active_branch()[0].timestamp == 123
+    assert manager.active_branch()[0].timestamp == 123
 
 
 def test_load_skips_malformed_lines(tmp_path):

@@ -149,9 +149,10 @@ def serialize_message(message: AgentMessage) -> dict[str, Any]:
 
 def deserialize_message(data: dict[str, Any]) -> AgentMessage:
     role = data["role"]
+    message: AgentMessage
     if role == "user":
-        return UserMessage(content=data["content"])
-    if role == "assistant":
+        message = UserMessage(content=data["content"])
+    elif role == "assistant":
         content: list[TextContent | ToolCall] = []
         for block in data["content"]:
             if block["type"] == "text":
@@ -162,7 +163,7 @@ def deserialize_message(data: dict[str, Any]) -> AgentMessage:
                         id=block["id"], name=block["name"], arguments=block["arguments"]
                     )
                 )
-        return AssistantMessage(
+        message = AssistantMessage(
             content=content,
             model=data["model"],
             provider=data["provider"],
@@ -175,11 +176,14 @@ def deserialize_message(data: dict[str, Any]) -> AgentMessage:
             error_message=data.get("errorMessage"),
             reasoning_content=data.get("reasoningContent"),
         )
-    if role == "toolResult":
-        return ToolResultMessage(
+    elif role == "toolResult":
+        message = ToolResultMessage(
             tool_call_id=data["toolCallId"],
             tool_name=data["toolName"],
             output=data["output"],
             is_error=data.get("isError", False),
         )
-    raise ValueError(f"unknown message role: {role!r}")
+    else:
+        raise ValueError(f"unknown message role: {role!r}")
+    message.timestamp = data.get("timestamp", message.timestamp)
+    return message

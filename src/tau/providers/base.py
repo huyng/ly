@@ -140,7 +140,6 @@ class HTTPProvider:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
-            # urllib does not decompress, and SSE must be read line by line.
             "Accept-Encoding": "identity",
         }
 

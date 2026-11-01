@@ -9,7 +9,6 @@ import threading
 import uuid
 from collections.abc import Generator, Mapping
 from typing import Any
-
 from ..events import ProviderEvent, ReasoningDeltaEvent, TextDeltaEvent, ToolNameEvent
 from ..messages import (
     AgentMessage,
@@ -26,15 +25,6 @@ from .base import (
     ProviderError,
     _as_int,
     _close_stream,
-)
-
-# From GPT-5.4 on, chat-completions refuses function tools unless the effort is
-# exactly "none", and an omitted effort is filled in with "medium". These models
-# both need it and accept it; gpt-6-astra and gpt-6.1-sol reject "none" outright
-# and are left out on purpose — they need /v1/responses.
-_ACCEPTS_NONE = (
-    "gpt-5.4", "gpt-5.5", "gpt-5.6",
-    "gpt-6-sol", "gpt-6-luna", "gpt-6.1-terra",
 )
 
 
@@ -132,8 +122,6 @@ class OpenAIProvider(HTTPProvider):
             body["tools"] = self._tool_schemas(tools)
         if self.reasoning_effort:
             body["reasoning_effort"] = self.reasoning_effort
-        elif tools and self.model.lower().startswith(_ACCEPTS_NONE):
-            body["reasoning_effort"] = "none"
         return json.dumps(body).encode("utf-8")
 
     # -- streaming ------------------------------------------------------------

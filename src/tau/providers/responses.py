@@ -99,9 +99,7 @@ class ResponsesProvider(HTTPProvider):
                 }
                 for tool in tools
             ]
-        # Unlike chat-completions there is no forced "none": real reasoning is
-        # the point of this endpoint. `summary: auto` is what puts reasoning
-        # text on the stream at all.
+        # `summary: auto` is what puts reasoning text on the stream at all.
         if self.reasoning_effort:
             body["reasoning"] = {
                 "effort": self.reasoning_effort,

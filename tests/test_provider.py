@@ -422,13 +422,12 @@ def test_reasoning_effort_can_be_set_with_env(monkeypatch):
     assert transport.body["reasoning_effort"] == "none"
 
 
-def test_newer_models_get_none_effort_when_tools_are_present(monkeypatch):
-    """Omitting the field is not the same as "none": these models default to
-    medium, which chat-completions refuses alongside function tools."""
+@pytest.mark.parametrize("model", ["gpt-5.6-luna", "gpt-6.1-sol", "gpt-6-astra"])
+def test_reasoning_effort_is_not_inferred_from_model(monkeypatch, model):
     monkeypatch.delenv("TAU_REASONING_EFFORT", raising=False)
-    provider, _ = make_provider([], model="gpt-5.6-luna")
+    provider, _ = make_provider([], model=model)
 
-    assert body_with_tools(provider)["reasoning_effort"] == "none"
+    assert "reasoning_effort" not in body_with_tools(provider)
 
 
 def test_none_effort_is_not_forced_without_tools(monkeypatch):
@@ -440,17 +439,7 @@ def test_none_effort_is_not_forced_without_tools(monkeypatch):
     assert "reasoning_effort" not in body
 
 
-def test_models_that_reject_none_get_no_effort_default(monkeypatch):
-    """gpt-6.1-sol 400s on reasoning_effort "none"; it needs /v1/responses,
-    so sending the field would only swap one error for another."""
-    monkeypatch.delenv("TAU_REASONING_EFFORT", raising=False)
-    for model in ("gpt-6.1-sol", "gpt-6-astra"):
-        provider, _ = make_provider([], model=model)
-
-        assert "reasoning_effort" not in body_with_tools(provider), model
-
-
-def test_explicit_reasoning_effort_beats_the_none_default(monkeypatch):
+def test_explicit_reasoning_effort_is_preserved_with_tools(monkeypatch):
     monkeypatch.setenv("TAU_REASONING_EFFORT", "high")
     provider, _ = make_provider([], model="gpt-5.6-luna")
 

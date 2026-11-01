@@ -165,12 +165,19 @@ class ResponsesBackend(HTTPBackend):
                     # The done event is authoritative: deltas may be incomplete.
                     item = _mapping(chunk.get("item"))
                     if item.get("type") == "function_call":
-                        call = calls.setdefault(_item_key(chunk, item), _call_entry(item))
+                        call = calls.setdefault(
+                            _item_key(chunk, item), _call_entry(item)
+                        )
                         call["id"] = call["id"] or _text(item.get("call_id"))
                         call["name"] = call["name"] or _text(item.get("name"))
-                        call["arguments"] = _text(item.get("arguments")) or call["arguments"]
+                        call["arguments"] = (
+                            _text(item.get("arguments")) or call["arguments"]
+                        )
                 elif kind == "response.completed":
-                    usage = _usage_from(_mapping(chunk.get("response")).get("usage")) or usage
+                    usage = (
+                        _usage_from(_mapping(chunk.get("response")).get("usage"))
+                        or usage
+                    )
                 elif kind == "response.incomplete":
                     stop_reason = "length"
                     response = _mapping(chunk.get("response"))
@@ -184,7 +191,9 @@ class ResponsesBackend(HTTPBackend):
                     usage = _usage_from(response.get("usage")) or usage
                     error = _mapping(response.get("error")) or chunk
                     retryable = error.get("code") in (
-                        "server_error", "rate_limit_exceeded", "insufficient_system_resource",
+                        "server_error",
+                        "rate_limit_exceeded",
+                        "insufficient_system_resource",
                     )
                     failure_reason = (
                         _text(error.get("message"))
@@ -202,7 +211,9 @@ class ResponsesBackend(HTTPBackend):
 
         if not aborted and stop_reason == "error":
             raise ProviderError(
-                failure_reason or "response failed", retryable=retryable, usage=usage,
+                failure_reason or "response failed",
+                retryable=retryable,
+                usage=usage,
             )
 
         content: list[TextContent | ToolCall] = []
@@ -266,11 +277,13 @@ def _text(value: Any) -> str:
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
+
 def _close_stream(stream: Any) -> None:
     """Close a transport generator if it is closable, ignoring the rest."""
     close = getattr(stream, "close", None)
     if callable(close):
         close()
+
 
 def _as_int(value: Any) -> int:
     return value if isinstance(value, int) else 0

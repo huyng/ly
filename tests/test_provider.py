@@ -46,7 +46,9 @@ class FakeTransport:
             self.closed = True
 
 
-def chunk(*, content=None, reasoning=None, tool_calls=None, finish_reason=None, usage=None):
+def chunk(
+    *, content=None, reasoning=None, tool_calls=None, finish_reason=None, usage=None
+):
     delta: dict[str, Any] = {"content": content, "reasoning_content": reasoning}
     if tool_calls is not None:
         delta["tool_calls"] = tool_calls
@@ -72,7 +74,9 @@ def collect(provider, messages):
             return events, stop.value
 
 
-def make_provider(chunks, model="deepseek-flash") -> tuple[ChatCompletionsBackend, FakeTransport]:
+def make_provider(
+    chunks, model="deepseek-flash"
+) -> tuple[ChatCompletionsBackend, FakeTransport]:
     transport = FakeTransport(chunks)
     provider = ChatCompletionsBackend(
         model=model,
@@ -112,8 +116,14 @@ def test_reasoning_is_streamed_stored_and_sent_back():
 
     events, message = collect(provider, [UserMessage(content="hi")])
 
-    assert "".join(e.delta for e in events if isinstance(e, ReasoningDeltaEvent)) == "Let me think."
-    assert "".join(e.delta for e in events if isinstance(e, TextDeltaEvent)) == "Hello there"
+    assert (
+        "".join(e.delta for e in events if isinstance(e, ReasoningDeltaEvent))
+        == "Let me think."
+    )
+    assert (
+        "".join(e.delta for e in events if isinstance(e, TextDeltaEvent))
+        == "Hello there"
+    )
     assert message.reasoning_content == "Let me think."
     assert message.text == "Hello there"
     assert message.stop_reason == "stop"
@@ -201,10 +211,14 @@ def test_reasoning_is_sent_back_alongside_tool_calls():
     [("insufficient_system_resource", True), ("content_filter", False)],
 )
 def test_failure_finish_reasons_raise_classified_errors(reason, retryable):
-    provider, transport = make_provider([
-        chunk(finish_reason=reason),
-        chunk(usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
-    ])
+    provider, transport = make_provider(
+        [
+            chunk(finish_reason=reason),
+            chunk(
+                usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+            ),
+        ]
+    )
 
     with pytest.raises(ProviderError, match=reason) as caught:
         collect(provider, [UserMessage(content="hi")])
@@ -222,7 +236,9 @@ class FakeResponse:
     """Minimal stand-in for http.client.HTTPResponse: iterable of byte lines."""
 
     def __init__(self, lines):
-        self.lines = [line.encode() if isinstance(line, str) else line for line in lines]
+        self.lines = [
+            line.encode() if isinstance(line, str) else line for line in lines
+        ]
         self.closed = False
 
     def __iter__(self):
@@ -278,7 +294,9 @@ def test_transport_decodes_split_utf8_lines(monkeypatch):
 
 def test_transport_surfaces_api_error_message(monkeypatch):
     error = urllib.error.HTTPError(
-        "https://x/v1/chat/completions", 401, "Unauthorized",
+        "https://x/v1/chat/completions",
+        401,
+        "Unauthorized",
         hdrs=email.message.Message(),
         fp=__import__("io").BytesIO(b'{"error": {"message": "bad api key"}}'),
     )
@@ -311,7 +329,9 @@ def test_transport_marks_unreachable_host_retryable(monkeypatch):
 
 def http_error(code, reason, body=b""):
     return urllib.error.HTTPError(
-        "https://x/v1/chat/completions", code, reason,
+        "https://x/v1/chat/completions",
+        code,
+        reason,
         hdrs=email.message.Message(),
         fp=__import__("io").BytesIO(body),
     )
@@ -404,16 +424,21 @@ def test_request_includes_tool_schemas_when_present():
     assert transport.body["tools"][0]["function"]["name"] == "noop"
 
 
-@pytest.mark.parametrize(("url", "service"), [
-    ("https://api.openai.com/v1", "openai"),
-    ("https://api.deepseek.com", "deepseek"),
-    ("https://api.z.ai/api/paas/v4", "zai"),
-    ("https://proxy.example/v1", "proxy.example"),
-    ("https://proxy.example/deepseek", "proxy.example"),
-])
+@pytest.mark.parametrize(
+    ("url", "service"),
+    [
+        ("https://api.openai.com/v1", "openai"),
+        ("https://api.deepseek.com", "deepseek"),
+        ("https://api.z.ai/api/paas/v4", "zai"),
+        ("https://proxy.example/v1", "proxy.example"),
+        ("https://proxy.example/deepseek", "proxy.example"),
+    ],
+)
 def test_response_records_api_and_service(url, service):
     backend = ChatCompletionsBackend(
-        base_url=url, api_key="test", transport=FakeTransport([chunk(content="ok")]),
+        base_url=url,
+        api_key="test",
+        transport=FakeTransport([chunk(content="ok")]),
     )
     _, message = collect(backend, [])
 
@@ -424,7 +449,9 @@ def test_response_records_api_and_service(url, service):
 
 def test_service_identifier_can_be_explicit():
     backend = ChatCompletionsBackend(
-        base_url="https://proxy.example/v1", api_key="test", provider="my-service",
+        base_url="https://proxy.example/v1",
+        api_key="test",
+        provider="my-service",
         transport=FakeTransport([]),
     )
     _, message = collect(backend, [])
@@ -477,8 +504,15 @@ def test_explicit_reasoning_effort_is_preserved_with_tools(monkeypatch):
 
 def test_tool_call_deltas_accumulate_across_chunks():
     chunks = [
-        chunk(tool_calls=[{"index": 0, "id": "call_1",
-                           "function": {"name": "read", "arguments": '{"pa'}}]),
+        chunk(
+            tool_calls=[
+                {
+                    "index": 0,
+                    "id": "call_1",
+                    "function": {"name": "read", "arguments": '{"pa'},
+                }
+            ]
+        ),
         chunk(tool_calls=[{"index": 0, "function": {"arguments": 'th": "a.py"}'}}]),
         chunk(finish_reason="tool_calls"),
     ]
@@ -529,7 +563,9 @@ def test_request_omits_an_assistant_message_with_no_content():
         api_key="test-key",
         transport=FakeTransport([]),
     )
-    aborted = AssistantMessage(content=[], model="m", provider="openai", stop_reason="aborted")
+    aborted = AssistantMessage(
+        content=[], model="m", provider="openai", stop_reason="aborted"
+    )
 
     request = provider._request_messages(
         "system", [UserMessage(content="hi"), aborted, UserMessage(content="again")]
@@ -583,7 +619,9 @@ def test_abort_mid_stream_closes_transport_and_reports_aborted():
 
     transport = AbortingTransport([])
     provider = ChatCompletionsBackend(model="m", api_key="k", transport=transport)
-    stream = provider.stream("system", [UserMessage(content="hi")], [], abort_event=abort)
+    stream = provider.stream(
+        "system", [UserMessage(content="hi")], [], abort_event=abort
+    )
 
     events = []
     while True:

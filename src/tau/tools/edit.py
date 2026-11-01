@@ -9,9 +9,7 @@ from .base import Tool, ToolResult
 MAX_DIFF_LINES = 120
 DIFF_CONTEXT_LINES = 3
 
-_EDIT_HINT = (
-    "edits must be a non-empty list of {oldText, newText} objects"
-)
+_EDIT_HINT = "edits must be a non-empty list of {oldText, newText} objects"
 
 
 @dataclass(frozen=True)
@@ -45,7 +43,7 @@ def _apply_regions(content: str, regions: list[_Region]) -> str:
     pieces: list[str] = []
     cursor = 0
     for region in sorted(regions, key=lambda r: (r.start, r.end)):
-        pieces.append(content[cursor:region.start])
+        pieces.append(content[cursor : region.start])
         pieces.append(region.replacement)
         cursor = region.end
     pieces.append(content[cursor:])
@@ -103,8 +101,14 @@ class EditTool(Tool):
                 "items": {
                     "type": "object",
                     "properties": {
-                        "oldText": {"type": "string", "description": "Exact text to replace"},
-                        "newText": {"type": "string", "description": "Replacement text"},
+                        "oldText": {
+                            "type": "string",
+                            "description": "Exact text to replace",
+                        },
+                        "newText": {
+                            "type": "string",
+                            "description": "Replacement text",
+                        },
                     },
                     "required": ["oldText", "newText"],
                 },
@@ -125,12 +129,18 @@ class EditTool(Tool):
         if not isinstance(edits, list) or not edits:
             return ToolResult(f"Error: {_EDIT_HINT} for {name}.", is_error=True)
         for index, edit in enumerate(edits):
-            if not isinstance(edit, dict) or "oldText" not in edit or "newText" not in edit:
+            if (
+                not isinstance(edit, dict)
+                or "oldText" not in edit
+                or "newText" not in edit
+            ):
                 return ToolResult(
                     f"Error: {_EDIT_HINT} for {name}; got something else at index {index}.",
                     is_error=True,
                 )
-            if not isinstance(edit["oldText"], str) or not isinstance(edit["newText"], str):
+            if not isinstance(edit["oldText"], str) or not isinstance(
+                edit["newText"], str
+            ):
                 return ToolResult(
                     f"Error: edits[{index}].oldText and edits[{index}].newText must both be "
                     f"strings for {name}.",
@@ -203,7 +213,10 @@ class WriteTool(Tool):
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Path to the file to write"},
-            "content": {"type": "string", "description": "Content to write to the file"},
+            "content": {
+                "type": "string",
+                "description": "Content to write to the file",
+            },
         },
         "required": ["path", "content"],
     }

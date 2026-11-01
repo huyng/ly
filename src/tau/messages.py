@@ -133,12 +133,14 @@ def serialize_message(message: AgentMessage) -> dict[str, Any]:
             if isinstance(block, TextContent):
                 blocks.append({"type": "text", "text": block.text})
             else:
-                blocks.append({
-                    "type": "toolCall",
-                    "id": block.id,
-                    "name": block.name,
-                    "arguments": block.arguments,
-                })
+                blocks.append(
+                    {
+                        "type": "toolCall",
+                        "id": block.id,
+                        "name": block.name,
+                        "arguments": block.arguments,
+                    }
+                )
         data["content"] = blocks
     elif isinstance(message, ToolResultMessage):
         data["toolCallId"] = message.tool_call_id
@@ -169,10 +171,13 @@ def deserialize_message(data: dict[str, Any]) -> AgentMessage:
             model=data["model"],
             provider=data["provider"],
             # Legacy logs used adapter names as providers, not service identities.
-            api=data.get("api", {
-                "openai": "openai-completions",
-                "openai-responses": "openai-responses",
-            }.get(data["provider"], "")),
+            api=data.get(
+                "api",
+                {
+                    "openai": "openai-completions",
+                    "openai-responses": "openai-responses",
+                }.get(data["provider"], ""),
+            ),
             stop_reason=data["stopReason"],
             usage=Usage(
                 input=data["usage"]["input"],

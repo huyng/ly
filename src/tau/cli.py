@@ -201,7 +201,8 @@ class Repl:
                 line += " " + summary
         else:
             status = (
-                self.theme.error("✗") if activity.result.is_error
+                self.theme.error("✗")
+                if activity.result.is_error
                 else self.theme.dim("✓")
             )
             line = status + self.theme.dim(f" {call.name}")
@@ -411,8 +412,7 @@ class Repl:
                 print(theme.dim("nothing to compact (too few turns, or disabled)"))
         else:
             print(
-                theme.error(f"unknown command: {command}")
-                + theme.dim(" (try /help)")
+                theme.error(f"unknown command: {command}") + theme.dim(" (try /help)")
             )
         return False
 
@@ -444,10 +444,19 @@ def print_mode(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="tau", description="A minimal coding agent, modeled after pi")
+    parser = argparse.ArgumentParser(
+        prog="tau", description="A minimal coding agent, modeled after pi"
+    )
     parser.add_argument("prompt", nargs="?", help="starting prompt (interactive mode)")
-    parser.add_argument("-p", "--print", action="store_true", help="print mode: run once, write final response")
-    parser.add_argument("-m", "--model", help="model to use (default: $TAU_MODEL or gpt-4.1)")
+    parser.add_argument(
+        "-p",
+        "--print",
+        action="store_true",
+        help="print mode: run once, write final response",
+    )
+    parser.add_argument(
+        "-m", "--model", help="model to use (default: $TAU_MODEL or gpt-4.1)"
+    )
     parser.add_argument("--base-url", help="OpenAI-compatible API base URL")
     parser.add_argument("--api-key", help="API key")
     parser.add_argument(
@@ -456,7 +465,9 @@ def main(argv: list[str] | None = None) -> None:
         help="OpenAI endpoint flavour (default: $TAU_API or chat); the newest "
         "models need `responses` to use tools",
     )
-    parser.add_argument("--resume", type=int, metavar="N", help="resume the n-th recent session")
+    parser.add_argument(
+        "--resume", type=int, metavar="N", help="resume the n-th recent session"
+    )
     parser.add_argument("--version", action="version", version=f"tau {__version__}")
     args = parser.parse_args(argv)
 

@@ -10,7 +10,9 @@ from tau.tools.search import GlobTool, GrepTool, _expand_braces
 @pytest.fixture
 def tree(tmp_path):
     (tmp_path / "src" / "deep").mkdir(parents=True)
-    (tmp_path / "src" / "app.py").write_text("import os\n\ndef handler():\n    return 'needle'\n")
+    (tmp_path / "src" / "app.py").write_text(
+        "import os\n\ndef handler():\n    return 'needle'\n"
+    )
     (tmp_path / "src" / "deep" / "util.py").write_text("x = 1\n# needle in a comment\n")
     (tmp_path / "README.md").write_text("needle docs\n")
     (tmp_path / "node_modules" / "dep").mkdir(parents=True)
@@ -179,7 +181,9 @@ def test_glob_expands_brace_alternation(tmp_path):
     (tmp_path / "README.md").write_text("")
     (tmp_path / "NOTES.rst").write_text("")
 
-    paths = GlobTool(cwd=str(tmp_path)).execute(pattern="**/*.{md,rst}").output.splitlines()
+    paths = (
+        GlobTool(cwd=str(tmp_path)).execute(pattern="**/*.{md,rst}").output.splitlines()
+    )
 
     assert "README.md" in paths
     assert "NOTES.rst" in paths
@@ -210,10 +214,10 @@ def test_grep_glob_filter_accepts_braces(grep):
 @pytest.mark.parametrize(
     "pattern",
     [
-        "**/*.py",           # no braces at all
-        "src/{app.py",       # unbalanced opening brace
-        "src/app.py}",       # unbalanced closing brace
-        "{}*.py",            # empty alternation
+        "**/*.py",  # no braces at all
+        "src/{app.py",  # unbalanced opening brace
+        "src/app.py}",  # unbalanced closing brace
+        "{}*.py",  # empty alternation
     ],
 )
 def test_glob_brace_expansion_never_raises(pattern):

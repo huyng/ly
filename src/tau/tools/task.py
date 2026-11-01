@@ -81,9 +81,7 @@ class TaskTool(Tool):
         """
         self._parent = session
 
-    def execute(
-        self, prompt: str, description: str = "", **_: Any
-    ) -> ToolResult:
+    def execute(self, prompt: str, description: str = "", **_: Any) -> ToolResult:
         if self._parent is None:
             return ToolResult(
                 "Error: the task tool is not bound to a session. Build the "

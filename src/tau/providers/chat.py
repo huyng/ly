@@ -36,9 +36,7 @@ class ChatCompletionsBackend(HTTPBackend):
     def _request_messages(
         self, system_prompt: str, messages: list[AgentMessage]
     ) -> list[dict[str, Any]]:
-        request: list[dict[str, Any]] = [
-            {"role": "system", "content": system_prompt}
-        ]
+        request: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         # Only the trailing assistant message is still in flight. Echoing reasoning
         # for finished turns is dead weight — no model reads it again, and it was
         # ~40% of all input tokens. Dropping the earlier blocks also leaves the
@@ -232,7 +230,9 @@ class ChatCompletionsBackend(HTTPBackend):
             except json.JSONDecodeError:
                 arguments = {"_raw": acc["arguments"]}
             content.append(
-                ToolCall(id=acc["id"] or new_call_id(), name=acc["name"], arguments=arguments)
+                ToolCall(
+                    id=acc["id"] or new_call_id(), name=acc["name"], arguments=arguments
+                )
             )
 
         return AssistantMessage(
@@ -271,11 +271,14 @@ def _usage_from(payload: Any) -> Usage | None:
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
+
 def _as_int(value: Any) -> int:
     return value if isinstance(value, int) else 0
 
+
 def new_call_id() -> str:
     return f"call_{uuid.uuid4().hex[:24]}"
+
 
 def _close_stream(stream: Any) -> None:
     """Close a transport generator if it is closable, ignoring the rest."""

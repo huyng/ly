@@ -44,7 +44,9 @@ class NoopTool(Tool):
         raise NotImplementedError
 
 
-def make_provider_for(chunks, *, model="gpt-6.1-sol") -> tuple[ResponsesBackend, FakeTransport]:
+def make_provider_for(
+    chunks, *, model="gpt-6.1-sol"
+) -> tuple[ResponsesBackend, FakeTransport]:
     transport = FakeTransport(chunks)
     provider = ResponsesBackend(
         model=model,
@@ -107,7 +109,10 @@ def test_reasoning_summary_deltas_are_streamed_and_stored():
 
     events, message = collect(provider, [UserMessage(content="hi")])
 
-    assert "".join(e.delta for e in events if isinstance(e, ReasoningDeltaEvent)) == "Thinking hard."
+    assert (
+        "".join(e.delta for e in events if isinstance(e, ReasoningDeltaEvent))
+        == "Thinking hard."
+    )
     assert message.reasoning_content == "Thinking hard."
     assert message.text == "Done."
 
@@ -117,17 +122,29 @@ def test_function_call_deltas_become_a_tool_call():
         event(
             "response.output_item.added",
             output_index=0,
-            item={"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "read"},
+            item={
+                "id": "fc_1",
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "read",
+            },
         ),
-        event("response.function_call_arguments.delta", item_id="fc_1", delta='{"path": '),
-        event("response.function_call_arguments.delta", item_id="fc_1", delta='"a.py"}'),
-        event("response.output_item.done", item={
-            "id": "fc_1",
-            "type": "function_call",
-            "call_id": "call_1",
-            "name": "read",
-            "arguments": '{"path": "a.py"}',
-        }),
+        event(
+            "response.function_call_arguments.delta", item_id="fc_1", delta='{"path": '
+        ),
+        event(
+            "response.function_call_arguments.delta", item_id="fc_1", delta='"a.py"}'
+        ),
+        event(
+            "response.output_item.done",
+            item={
+                "id": "fc_1",
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "read",
+                "arguments": '{"path": "a.py"}',
+            },
+        ),
         event("response.completed", response={"status": "completed"}),
     ]
     provider, _ = make_provider_for(chunks)
@@ -146,18 +163,25 @@ def test_function_call_deltas_become_a_tool_call():
 def test_function_calls_preserve_stream_order_not_item_id_order():
     chunks = []
     for index, item_id in enumerate(["fc_z", "fc_a"]):
-        chunks.append(event(
-            "response.output_item.added",
-            output_index=index,
-            item={
-                "id": item_id, "type": "function_call",
-                "call_id": f"call_{index}", "name": "read",
-            },
-        ))
-        chunks.append(event(
-            "response.function_call_arguments.delta",
-            item_id=item_id, delta=json.dumps({"path": f"{index}.py"}),
-        ))
+        chunks.append(
+            event(
+                "response.output_item.added",
+                output_index=index,
+                item={
+                    "id": item_id,
+                    "type": "function_call",
+                    "call_id": f"call_{index}",
+                    "name": "read",
+                },
+            )
+        )
+        chunks.append(
+            event(
+                "response.function_call_arguments.delta",
+                item_id=item_id,
+                delta=json.dumps({"path": f"{index}.py"}),
+            )
+        )
     chunks.append(event("response.completed", response={"status": "completed"}))
     provider, _ = make_provider_for(chunks)
 
@@ -165,24 +189,42 @@ def test_function_calls_preserve_stream_order_not_item_id_order():
 
     assert [call.id for call in message.tool_calls] == ["call_0", "call_1"]
     assert [call.arguments for call in message.tool_calls] == [
-        {"path": "0.py"}, {"path": "1.py"},
+        {"path": "0.py"},
+        {"path": "1.py"},
     ]
 
 
 @pytest.mark.parametrize("final_arguments", ['{"path": "a.py"}', None])
 def test_done_item_prefers_complete_arguments_and_falls_back_to_deltas(final_arguments):
     chunks = [
-        event("response.output_item.added", item={
-            "id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "read",
-        }),
         event(
-            "response.function_call_arguments.delta", item_id="fc_1",
+            "response.output_item.added",
+            item={
+                "id": "fc_1",
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "read",
+            },
+        ),
+        event(
+            "response.function_call_arguments.delta",
+            item_id="fc_1",
             delta='{"path":' if final_arguments else '{"path": "a.py"}',
         ),
-        event("response.output_item.done", item={
-            "id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "read",
-            **({"arguments": final_arguments} if final_arguments is not None else {}),
-        }),
+        event(
+            "response.output_item.done",
+            item={
+                "id": "fc_1",
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "read",
+                **(
+                    {"arguments": final_arguments}
+                    if final_arguments is not None
+                    else {}
+                ),
+            },
+        ),
         event("response.completed", response={"status": "completed"}),
     ]
     provider, _ = make_provider_for(chunks)
@@ -214,7 +256,10 @@ def test_done_item_supplies_arguments_the_deltas_missed():
 
 def test_failed_response_reports_an_error():
     chunks = [
-        event("response.failed", response={"status": "failed", "error": {"message": "boom"}})
+        event(
+            "response.failed",
+            response={"status": "failed", "error": {"message": "boom"}},
+        )
     ]
     provider, _ = make_provider_for(chunks)
 
@@ -225,12 +270,25 @@ def test_failed_response_reports_an_error():
 
 
 @pytest.mark.parametrize("kind", ["response.failed", "error"])
-@pytest.mark.parametrize("code", ["server_error", "rate_limit_exceeded", "invalid_prompt"])
+@pytest.mark.parametrize(
+    "code", ["server_error", "rate_limit_exceeded", "invalid_prompt"]
+)
 def test_stream_errors_are_classified_by_code(kind, code):
     error = {"code": code, "message": "failure details"}
-    payload = {"response": {"error": error, "usage": {
-        "input_tokens": 10, "output_tokens": 5, "total_tokens": 15,
-    }}} if kind == "response.failed" else error
+    payload = (
+        {
+            "response": {
+                "error": error,
+                "usage": {
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "total_tokens": 15,
+                },
+            }
+        }
+        if kind == "response.failed"
+        else error
+    )
     provider, transport = make_provider_for([event(kind, **payload)])
 
     with pytest.raises(ProviderError, match="failure details") as caught:
@@ -244,10 +302,14 @@ def test_stream_errors_are_classified_by_code(kind, code):
 
 
 def test_content_filtered_response_is_not_retryable():
-    provider, _ = make_provider_for([event(
-        "response.incomplete",
-        response={"incomplete_details": {"reason": "content_filter"}},
-    )])
+    provider, _ = make_provider_for(
+        [
+            event(
+                "response.incomplete",
+                response={"incomplete_details": {"reason": "content_filter"}},
+            )
+        ]
+    )
 
     with pytest.raises(ProviderError, match="content_filter") as caught:
         collect(provider, [UserMessage(content="hi")])
@@ -259,7 +321,10 @@ def test_incomplete_response_maps_to_length():
     chunks = [
         event(
             "response.incomplete",
-            response={"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}},
+            response={
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+            },
         )
     ]
     provider, _ = make_provider_for(chunks)
@@ -343,7 +408,12 @@ def test_no_reasoning_object_by_default(monkeypatch):
 
 @pytest.mark.parametrize(
     ("api", "expected"),
-    [(None, "chat"), ("chat", "chat"), ("responses", "responses"), (" RESPONSES ", "responses")],
+    [
+        (None, "chat"),
+        ("chat", "chat"),
+        ("responses", "responses"),
+        (" RESPONSES ", "responses"),
+    ],
 )
 def test_make_provider_picks_the_backend(monkeypatch, api, expected):
     monkeypatch.delenv("TAU_API", raising=False)

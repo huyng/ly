@@ -63,7 +63,9 @@ class FakeProvider:
 
 
 def reply(text: str) -> AssistantMessage:
-    return AssistantMessage(content=[TextContent(text=text)], model="fake", provider="fake")
+    return AssistantMessage(
+        content=[TextContent(text=text)], model="fake", provider="fake"
+    )
 
 
 def summary_requests(provider) -> list[dict[str, Any]]:
@@ -73,14 +75,19 @@ def summary_requests(provider) -> list[dict[str, Any]]:
 def unknown_tool_turn() -> AssistantMessage:
     return AssistantMessage(
         content=[ToolCall(id="call-x", name="nope", arguments={})],
-        model="fake", provider="fake", stop_reason="toolUse",
+        model="fake",
+        provider="fake",
+        stop_reason="toolUse",
     )
 
 
 def failing(message: str = "boom") -> AssistantMessage:
     return AssistantMessage(
-        content=[], model="fake", provider="fake",
-        stop_reason="error", error_message=message,
+        content=[],
+        model="fake",
+        provider="fake",
+        stop_reason="error",
+        error_message=message,
     )
 
 
@@ -108,7 +115,9 @@ def build_history(manager, turns: int, usage_input: int = 0) -> None:
         )
 
 
-def make_session(turns: list[AssistantMessage], **overrides) -> tuple[AgentSession, FakeProvider]:
+def make_session(
+    turns: list[AssistantMessage], **overrides
+) -> tuple[AgentSession, FakeProvider]:
     provider = FakeProvider(turns)
     config = CompactionConfig(
         enabled=True,
@@ -151,7 +160,8 @@ def test_split_index_keeps_tool_pairs_together():
         UserMessage(content="u0"),
         AssistantMessage(
             content=[ToolCall(id="c1", name="read", arguments={"path": "x"})],
-            model="fake", provider="fake",
+            model="fake",
+            provider="fake",
         ),
         ToolResultMessage(tool_call_id="c1", tool_name="read", output="data"),
         UserMessage(content="u1"),
@@ -172,7 +182,8 @@ def test_split_never_cuts_inside_a_turn():
             UserMessage(content="u0"),
             AssistantMessage(
                 content=[ToolCall(id="c1", name="read", arguments={})],
-                model="fake", provider="fake",
+                model="fake",
+                provider="fake",
             ),
             ToolResultMessage(tool_call_id="c1", tool_name="read", output="x"),
             UserMessage(content="u1"),
@@ -206,7 +217,9 @@ def test_compact_reroots_the_branch_and_persists(tmp_path):
     before = len(manager.active_branch())
     keep = manager.active_branch()[-2:]
 
-    manager.compact(UserMessage(content=f"{SUMMARY_PREFIX}\nnotes\n</conversation_summary>"), keep)
+    manager.compact(
+        UserMessage(content=f"{SUMMARY_PREFIX}\nnotes\n</conversation_summary>"), keep
+    )
 
     branch = manager.active_branch()
     assert len(branch) == 3
@@ -317,7 +330,9 @@ def test_failed_summary_leaves_history_untouched():
     build_history(session.session_manager, 3)
     errors: list[str] = []
     session.subscribe(
-        lambda event: errors.append(event.message) if isinstance(event, ErrorEvent) else None
+        lambda event: (
+            errors.append(event.message) if isinstance(event, ErrorEvent) else None
+        )
     )
 
     session.prompt("next")
@@ -373,7 +388,9 @@ def test_cancelled_compaction_stops_the_run(stop_reason):
 
     class CancellingProvider(FakeProvider):
         def stream(self, system_prompt, messages, tools, abort_event=None):
-            result = yield from super().stream(system_prompt, messages, tools, abort_event)
+            result = yield from super().stream(
+                system_prompt, messages, tools, abort_event
+            )
             if stop_reason == "stop":
                 session.abort()
             return result
@@ -396,9 +413,7 @@ def test_cancelled_compaction_stops_the_run(stop_reason):
 def test_failed_summary_is_not_retried_within_the_run():
     # An unknown-tool call forces a second loop iteration, which would try to
     # compact again if the failure flag were not sticky for the run.
-    session, provider = make_session(
-        [failing(), unknown_tool_turn(), reply("final")]
-    )
+    session, provider = make_session([failing(), unknown_tool_turn(), reply("final")])
     build_history(session.session_manager, 3)
     session.prompt("next")
     assert len(summary_requests(provider)) == 1
@@ -438,14 +453,18 @@ def test_failed_summary_usage_counts_toward_session_usage():
     class FailingProvider(FakeProvider):
         def stream(self, *_args, **_kwargs):
             raise ProviderError(
-                "summary failed", retryable=False,
+                "summary failed",
+                retryable=False,
                 usage=Usage(input=100, output=10, total_tokens=110),
             )
 
     usage = Usage()
     with pytest.raises(ProviderError, match="summary failed"):
         summarize(
-            FailingProvider([]), [UserMessage(content="hi")], CompactionConfig(), usage=usage,
+            FailingProvider([]),
+            [UserMessage(content="hi")],
+            CompactionConfig(),
+            usage=usage,
         )
 
     assert usage.total_tokens == 110
@@ -491,7 +510,9 @@ def test_summarize_does_not_request_a_batch_after_cancellation():
     abort_event.set()
 
     with pytest.raises(RuntimeError, match="compaction aborted"):
-        summarize(provider, [UserMessage(content="hi")], CompactionConfig(), abort_event)
+        summarize(
+            provider, [UserMessage(content="hi")], CompactionConfig(), abort_event
+        )
 
     assert provider.requests == []
 
@@ -522,7 +543,9 @@ def test_summary_larger_than_the_history_is_not_applied():
 
 
 def test_unhelpful_summary_is_not_retried_within_the_run():
-    session, provider = make_session([reply("z" * 5000), unknown_tool_turn(), reply("final")])
+    session, provider = make_session(
+        [reply("z" * 5000), unknown_tool_turn(), reply("final")]
+    )
     build_history(session.session_manager, 3)
 
     session.prompt("next")

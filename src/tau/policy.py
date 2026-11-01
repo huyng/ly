@@ -103,7 +103,9 @@ def _tokens(command: str) -> list[str] | None:
 def _credential(path: str) -> bool:
     """True if any component of ``path`` names a usual credential store."""
     parts = PurePath(path).parts
-    return bool(parts) and (any(p in _SECRETS for p in parts) or parts[-1].endswith(".pem"))
+    return bool(parts) and (
+        any(p in _SECRETS for p in parts) or parts[-1].endswith(".pem")
+    )
 
 
 def _mentions_credentials(command: str, cwd: str) -> str | None:

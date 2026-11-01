@@ -70,11 +70,15 @@ class AgentSession:
         self.session_manager = session_manager
         self.system_prompt = system_prompt
         self.cwd = cwd
-        self.compaction = compaction if compaction is not None else CompactionConfig.from_env()
+        self.compaction = (
+            compaction if compaction is not None else CompactionConfig.from_env()
+        )
         self.tool_guard = tool_guard if tool_guard is not None else basic_guard(cwd)
         self._subscribers: list[Callable] = []
         # A shared event lets a parent and its sub-agents abort together.
-        self._abort_event = abort_event if abort_event is not None else threading.Event()
+        self._abort_event = (
+            abort_event if abort_event is not None else threading.Event()
+        )
         self._busy = False
         self._compaction_blocked = False  # at most one *failed* compaction per run
         self.usage = Usage()  # cumulative totals across runs
@@ -169,7 +173,10 @@ class AgentSession:
                 if asst_message is None:
                     aborted = True
                     break
-                if asst_message.tool_calls and asst_message.stop_reason in ("toolUse", "aborted"):
+                if asst_message.tool_calls and asst_message.stop_reason in (
+                    "toolUse",
+                    "aborted",
+                ):
                     # Even partial calls from an aborted stream need results
                     # before the branch can be sent again.
                     if not self._execute_tool_calls(asst_message):
@@ -247,8 +254,7 @@ class AgentSession:
         if tokens_before is None:
             tokens_before = estimate_tokens(messages)
         self._emit(
-            CompactionStartEvent(messages=len(older),
-                                 tokens=estimate_tokens(older))
+            CompactionStartEvent(messages=len(older), tokens=estimate_tokens(older))
         )
         try:
             summary = summarize(
@@ -311,7 +317,9 @@ class AgentSession:
                     try:
                         if stream is None:
                             stream = self.provider.stream(
-                                self.system_prompt, messages, tools,
+                                self.system_prompt,
+                                messages,
+                                tools,
                                 abort_event=self._abort_event,
                             )
                         event = next(stream)
@@ -434,6 +442,10 @@ class AgentSession:
         try:
             return tool.execute(**call.arguments)
         except TypeError as exc:
-            return ToolResult(output=f"Error: bad arguments for {call.name}: {exc}", is_error=True)
+            return ToolResult(
+                output=f"Error: bad arguments for {call.name}: {exc}", is_error=True
+            )
         except Exception as exc:  # noqa: BLE001 — tool failures must reach the model
-            return ToolResult(output=f"Error executing {call.name}: {exc}", is_error=True)
+            return ToolResult(
+                output=f"Error executing {call.name}: {exc}", is_error=True
+            )

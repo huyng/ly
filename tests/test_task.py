@@ -60,13 +60,18 @@ class FakeProvider:
 
 
 def reply(text: str) -> AssistantMessage:
-    return AssistantMessage(content=[TextContent(text=text)], model="fake", provider="fake")
+    return AssistantMessage(
+        content=[TextContent(text=text)], model="fake", provider="fake"
+    )
 
 
 def failing(message: str) -> AssistantMessage:
     return AssistantMessage(
-        content=[], model="fake", provider="fake",
-        stop_reason="error", error_message=message,
+        content=[],
+        model="fake",
+        provider="fake",
+        stop_reason="error",
+        error_message=message,
     )
 
 
@@ -109,7 +114,9 @@ def test_task_runs_a_subagent_and_returns_only_its_report(workspace):
     session.prompt("go")
 
     tool_result = [
-        message for message in session.messages if isinstance(message, ToolResultMessage)
+        message
+        for message in session.messages
+        if isinstance(message, ToolResultMessage)
     ][-1]
     assert "handler is defined in a.py:1" in tool_result.output
     assert "sub-agent: 0 tool calls" in tool_result.output
@@ -142,7 +149,8 @@ def test_subagent_activity_is_live_and_kept_out_of_parent_context(workspace, pat
     session.prompt("go")
 
     assert [type(item.event) for item in activities] == [
-        ToolExecutionStartEvent, ToolExecutionEndEvent
+        ToolExecutionStartEvent,
+        ToolExecutionEndEvent,
     ]
     assert all(item.description == "explore" for item in activities)
     assert all(item.event.tool_call == call for item in activities)
@@ -204,7 +212,9 @@ def test_subagent_sees_the_delegated_prompt_verbatim(workspace):
         [task_call(prompt="find the tests\nand list them"), reply("ok"), reply("done")],
     )
     session.prompt("go")
-    assert provider.requests[1]["messages"][0].content == "find the tests\nand list them"
+    assert (
+        provider.requests[1]["messages"][0].content == "find the tests\nand list them"
+    )
 
 
 def test_empty_subagent_report_is_replaced_with_a_note(workspace):
@@ -214,7 +224,9 @@ def test_empty_subagent_report_is_replaced_with_a_note(workspace):
     )
     session.prompt("go")
     tool_result = [
-        message for message in session.messages if isinstance(message, ToolResultMessage)
+        message
+        for message in session.messages
+        if isinstance(message, ToolResultMessage)
     ][-1]
     assert "without producing a final report" in tool_result.output
 
@@ -232,7 +244,9 @@ def test_task_requires_a_prompt(workspace):
     )
     session.prompt("go")
     tool_result = [
-        message for message in session.messages if isinstance(message, ToolResultMessage)
+        message
+        for message in session.messages
+        if isinstance(message, ToolResultMessage)
     ][-1]
     assert tool_result.is_error
     assert "non-empty" in tool_result.output
@@ -262,7 +276,9 @@ def test_subagent_provider_error_is_a_tool_error(workspace, monkeypatch):
     session.prompt("go")
 
     tool_result = [
-        message for message in session.messages if isinstance(message, ToolResultMessage)
+        message
+        for message in session.messages
+        if isinstance(message, ToolResultMessage)
     ][-1]
     assert tool_result.is_error
     assert "sub-agent failed" in tool_result.output

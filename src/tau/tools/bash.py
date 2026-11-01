@@ -58,7 +58,9 @@ def _truncate(output: str) -> str:
     lines = output.splitlines()
     if len(lines) > MAX_OUTPUT_LINES:
         skipped = len(lines) - MAX_OUTPUT_LINES
-        output = f"... {skipped} lines skipped ...\n" + "\n".join(lines[-MAX_OUTPUT_LINES:])
+        output = f"... {skipped} lines skipped ...\n" + "\n".join(
+            lines[-MAX_OUTPUT_LINES:]
+        )
     data = output.encode("utf-8", errors="replace")
     if len(data) <= MAX_OUTPUT_BYTES:
         return output
@@ -99,7 +101,10 @@ class BashTool(Tool):
         "type": "object",
         "properties": {
             "command": {"type": "string", "description": "Shell command to execute"},
-            "timeout": {"type": "integer", "description": "Timeout in seconds (optional)"},
+            "timeout": {
+                "type": "integer",
+                "description": "Timeout in seconds (optional)",
+            },
         },
         "required": ["command"],
     }
@@ -107,9 +112,7 @@ class BashTool(Tool):
     def __init__(self, cwd: str | None = None):
         self.cwd = cwd
 
-    def execute(
-        self, command: str, timeout: int | None = None, **_: Any
-    ) -> ToolResult:
+    def execute(self, command: str, timeout: int | None = None, **_: Any) -> ToolResult:
         timeout_seconds = timeout or DEFAULT_TIMEOUT
         # Regular files, not pipes: `wait` on a pipe waits for EOF, so a
         # backgrounded grandchild (`nohup srv &`) inheriting the pipe would keep

@@ -23,14 +23,37 @@ from typing import Any, ClassVar
 
 from .base import Tool, ToolResult
 
-SKIP_DIRS = frozenset({
-    ".git", ".hg", ".svn", ".jj",
-    "node_modules", "bower_components",
-    ".venv", "venv", "env", ".env",
-    "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox",
-    ".cache", ".gradle", ".next", ".nuxt", ".svelte-kit", ".turbo",
-    "dist", "build", "target", "out", ".idea", ".vscode",
-})
+SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".jj",
+        "node_modules",
+        "bower_components",
+        ".venv",
+        "venv",
+        "env",
+        ".env",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".cache",
+        ".gradle",
+        ".next",
+        ".nuxt",
+        ".svelte-kit",
+        ".turbo",
+        "dist",
+        "build",
+        "target",
+        "out",
+        ".idea",
+        ".vscode",
+    }
+)
 
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_LINE_CHARS = 400
@@ -124,8 +147,15 @@ def _match_segments(parts: list[str], pattern: list[str]) -> bool:
     if pattern[0] == "**":
         # A trailing `**` still needs one segment to land on, as full_match does.
         first = 1 if len(pattern) == 1 else 0
-        return any(_match_segments(parts[i:], pattern[1:]) for i in range(first, len(parts) + 1))
-    return bool(parts) and fnmatch.fnmatchcase(parts[0], pattern[0]) and _match_segments(parts[1:], pattern[1:])
+        return any(
+            _match_segments(parts[i:], pattern[1:])
+            for i in range(first, len(parts) + 1)
+        )
+    return (
+        bool(parts)
+        and fnmatch.fnmatchcase(parts[0], pattern[0])
+        and _match_segments(parts[1:], pattern[1:])
+    )
 
 
 def _iter_files(root: Path, pattern: str | None = None) -> Iterator[Path]:
@@ -135,7 +165,8 @@ def _iter_files(root: Path, pattern: str | None = None) -> Iterator[Path]:
         # Hidden directories are skipped, matching ripgrep's default; hidden
         # *files* stay visible so `.gitignore`-style config is searchable.
         dirnames[:] = sorted(
-            name for name in dirnames
+            name
+            for name in dirnames
             if name not in SKIP_DIRS and not name.startswith(".")
         )
         for filename in sorted(filenames):
@@ -161,7 +192,9 @@ def _read_text(path: Path) -> str | None:
     return data.decode("utf-8", errors="replace")
 
 
-def _content_lines(relative: str, lines: list[str], hits: list[int], context: int) -> list[str]:
+def _content_lines(
+    relative: str, lines: list[str], hits: list[int], context: int
+) -> list[str]:
     """`path:line:text` for matches, `path-line-text` for context lines."""
     out: list[str] = []
     matched = set(hits)
@@ -247,7 +280,9 @@ class GrepTool(Tool):
         try:
             regex = re.compile(pattern, re.IGNORECASE if ignore_case else 0)
         except re.error as exc:
-            return ToolResult(f"Error: invalid regular expression {pattern!r}: {exc}", is_error=True)
+            return ToolResult(
+                f"Error: invalid regular expression {pattern!r}: {exc}", is_error=True
+            )
 
         root = _resolve(path, self.cwd)
         shown_root = _display(root, self.cwd)
@@ -345,10 +380,7 @@ class GlobTool(Tool):
             return ToolResult(f"Error: no such path: {shown_root}", is_error=True)
 
         limit_count = max(limit or DEFAULT_GLOB_LIMIT, 1)
-        found = (
-            [root] if root.is_file()
-            else list(_iter_files(root, pattern))
-        )
+        found = [root] if root.is_file() else list(_iter_files(root, pattern))
         if not found:
             return ToolResult(f"No files match {pattern!r} in {shown_root}")
 

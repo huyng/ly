@@ -31,15 +31,15 @@ def make_repl(threshold_tokens: int = 100_000, enabled: bool = True) -> Repl:
         tools=[],
         session_manager=SessionManager(in_memory=True),
         system_prompt="system",
-        compaction=CompactionConfig(
-            enabled=enabled, threshold_tokens=threshold_tokens
-        ),
+        compaction=CompactionConfig(enabled=enabled, threshold_tokens=threshold_tokens),
     )
     # A run that billed 82k for its prompt and left nothing behind: the next
     # request is exactly what the provider measured last time.
     session.session_manager.append(
         AssistantMessage(
-            content=[TextContent(text="done")], model="fake", provider="fake",
+            content=[TextContent(text="done")],
+            model="fake",
+            provider="fake",
             usage=Usage(input=82_000, output=12, total_tokens=82_012),
         )
     )
@@ -60,7 +60,9 @@ def test_task_activity_shows_calls_and_status_without_child_output(capsys):
         repl._on_event(TaskActivityEvent("explore", ToolExecutionStartEvent(call)))
         assert f"→ {name}" in capsys.readouterr().out
         result = ToolResultMessage(call.id, name, "private child output", is_error)
-        repl._on_event(TaskActivityEvent("explore", ToolExecutionEndEvent(call, result)))
+        repl._on_event(
+            TaskActivityEvent("explore", ToolExecutionEndEvent(call, result))
+        )
         out = capsys.readouterr().out
         assert f"{'✗' if is_error else '✓'} {name}" in out
         assert "private child output" not in out

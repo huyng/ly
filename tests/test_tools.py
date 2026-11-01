@@ -29,6 +29,7 @@ def write_file(tmp_path, name: str, content: str):
     path.write_text(content)
     return path
 
+
 # -- edit: offset-based application ------------------------------------------
 
 
@@ -36,41 +37,57 @@ def test_chained_edits_are_applied_to_the_original_text(tmp_path, edit):
     """Regression: edits used to be applied sequentially to mutating content,
     so an earlier replacement could be clobbered by a later oldText match."""
     path = write_file(tmp_path, "f.txt", "A\nB\n")
-    result = edit.execute(path="f.txt", edits=[
-        {"oldText": "A", "newText": "B"},
-        {"oldText": "B", "newText": "C"},
-    ])
+    result = edit.execute(
+        path="f.txt",
+        edits=[
+            {"oldText": "A", "newText": "B"},
+            {"oldText": "B", "newText": "C"},
+        ],
+    )
     assert not result.is_error
     assert path.read_text() == "B\nC\n"
 
 
 def test_independent_edits_apply_in_source_order(tmp_path, edit):
-    path = write_file(tmp_path, "f.py", "def one():\n    return 1\n\ndef two():\n    return 2\n")
-    result = edit.execute(path="f.py", edits=[
-        {"oldText": "return 2", "newText": "return 22"},
-        {"oldText": "return 1", "newText": "return 11"},
-    ])
+    path = write_file(
+        tmp_path, "f.py", "def one():\n    return 1\n\ndef two():\n    return 2\n"
+    )
+    result = edit.execute(
+        path="f.py",
+        edits=[
+            {"oldText": "return 2", "newText": "return 22"},
+            {"oldText": "return 1", "newText": "return 11"},
+        ],
+    )
     assert not result.is_error
-    assert path.read_text() == "def one():\n    return 11\n\ndef two():\n    return 22\n"
+    assert (
+        path.read_text() == "def one():\n    return 11\n\ndef two():\n    return 22\n"
+    )
 
 
 def test_edits_are_length_shifting_and_order_independent(tmp_path, edit):
     """A long replacement must not shift a later match's resolved offsets."""
     path = write_file(tmp_path, "f.txt", "start middle end")
-    result = edit.execute(path="f.txt", edits=[
-        {"oldText": "start", "newText": "start with a much longer prefix"},
-        {"oldText": "end", "newText": "finish"},
-    ])
+    result = edit.execute(
+        path="f.txt",
+        edits=[
+            {"oldText": "start", "newText": "start with a much longer prefix"},
+            {"oldText": "end", "newText": "finish"},
+        ],
+    )
     assert not result.is_error
     assert path.read_text() == "start with a much longer prefix middle finish"
 
 
 def test_overlapping_edits_are_rejected(tmp_path, edit):
     path = write_file(tmp_path, "f.txt", "abcd")
-    result = edit.execute(path="f.txt", edits=[
-        {"oldText": "abc", "newText": "x"},
-        {"oldText": "bcd", "newText": "y"},
-    ])
+    result = edit.execute(
+        path="f.txt",
+        edits=[
+            {"oldText": "abc", "newText": "x"},
+            {"oldText": "bcd", "newText": "y"},
+        ],
+    )
     assert result.is_error
     assert "overlap" in result.output
     assert path.read_text() == "abcd"  # untouched
@@ -111,6 +128,7 @@ def test_missing_file_reports_error(tmp_path, edit):
     result = edit.execute(path="nope.txt", edits=[{"oldText": "a", "newText": "b"}])
     assert result.is_error
     assert "Error reading" in result.output
+
 
 # -- edit: diff output -------------------------------------------------------
 
@@ -162,13 +180,12 @@ def test_large_diff_is_truncated(tmp_path, edit):
     diff_lines = result.output.splitlines()
     assert len(diff_lines) <= MAX_DIFF_LINES + 3  # summary, blank, capped diff
 
+
 # -- write / read ------------------------------------------------------------
 
 
 def test_write_creates_parent_directories(tmp_path):
-    result = WriteTool(cwd=str(tmp_path)).execute(
-        path="a/b/c.txt", content="hello"
-    )
+    result = WriteTool(cwd=str(tmp_path)).execute(path="a/b/c.txt", content="hello")
     assert not result.is_error
     assert (tmp_path / "a" / "b" / "c.txt").read_text() == "hello"
 
@@ -204,6 +221,7 @@ def test_read_rejects_binary(tmp_path):
     result = ReadTool(cwd=str(tmp_path)).execute(path="bin")
     assert result.is_error
     assert "not a text file" in result.output
+
 
 # -- bash: process output ----------------------------------------------------
 
@@ -403,10 +421,13 @@ def test_validation_allows_float_for_number_but_not_integer():
 
 def test_validation_validates_array_items():
     schema = EditTool.parameters
-    problems = validate_arguments(schema, {
-        "path": "f.txt",
-        "edits": [{"oldText": "a", "newText": "b"}, {"oldText": "c"}],
-    })
+    problems = validate_arguments(
+        schema,
+        {
+            "path": "f.txt",
+            "edits": [{"oldText": "a", "newText": "b"}, {"oldText": "c"}],
+        },
+    )
     assert problems == ["arguments.edits[1].newText is required"]
 
 

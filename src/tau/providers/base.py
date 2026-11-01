@@ -49,7 +49,9 @@ class ProviderError(RuntimeError):
     ``usage`` preserves billed tokens when a streamed response ends in failure.
     """
 
-    def __init__(self, message: str, *, retryable: bool = True, usage: Usage | None = None):
+    def __init__(
+        self, message: str, *, retryable: bool = True, usage: Usage | None = None
+    ):
         super().__init__(message)
         self.retryable = retryable
         self.usage = usage
@@ -102,12 +104,20 @@ class HTTPBackend:
     variables, then OPENAI_* environment variables, then defaults.
     """
 
-    def __init__(self, model: str | None = None, base_url: str | None = None,
-                 api_key: str | None = None, transport: Transport | None = None,
-                 timeout: float = DEFAULT_TIMEOUT, provider: str | None = None):
+    def __init__(
+        self,
+        model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        transport: Transport | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
+        provider: str | None = None,
+    ):
         self.model = model or os.environ.get("TAU_MODEL", "gpt-4.1")
         self.base_url = (
-            base_url or os.environ.get("TAU_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+            base_url
+            or os.environ.get("TAU_BASE_URL")
+            or os.environ.get("OPENAI_BASE_URL")
             or "https://api.openai.com/v1"
         )
         hostname = urllib.parse.urlsplit(self.base_url).hostname or ""
@@ -131,13 +141,18 @@ class HTTPBackend:
         override = os.environ.get("TAU_PASS_REASONING_CONTENT")
         if override is not None:
             self.pass_reasoning_content = override.strip().lower() not in (
-                "0", "false", "no", "off",
+                "0",
+                "false",
+                "no",
+                "off",
             )
 
         # Off by default: the endpoint picks the effort. Some endpoints refuse
         # reasoning_effort alongside function tools on chat-completions and want
         # "none" (or /v1/responses, which tau speaks via `responses`).
-        self.reasoning_effort = os.environ.get("TAU_REASONING_EFFORT", "").strip() or None
+        self.reasoning_effort = (
+            os.environ.get("TAU_REASONING_EFFORT", "").strip() or None
+        )
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -232,6 +247,3 @@ def _is_retryable_status(code: int | None) -> bool:
     if code is None:
         return True
     return code in RETRYABLE_STATUSES or 500 <= code <= 599
-
-
-

@@ -185,7 +185,10 @@ def test_session_jsonl_persistence(tmp_path):
     # reload and verify the active branch is restored
     restored = SessionManager(directory=tmp_path)
     restored.load(session_file)
-    assert [type(m) for m in restored.active_branch()] == [UserMessage, AssistantMessage]
+    assert [type(m) for m in restored.active_branch()] == [
+        UserMessage,
+        AssistantMessage,
+    ]
 
 
 def test_unknown_tool_records_error_result(tmp_path):
@@ -421,7 +424,9 @@ def test_permanent_error_is_not_retried(tmp_path):
     )
     errors: list[str] = []
     session.subscribe(
-        lambda event: errors.append(event.message) if isinstance(event, ErrorEvent) else None
+        lambda event: (
+            errors.append(event.message) if isinstance(event, ErrorEvent) else None
+        )
     )
 
     final = session.prompt("hi")
@@ -536,7 +541,8 @@ def failing_provider(reason, *, retryable=False):
         def stream(self, *_args, **_kwargs):
             self.calls += 1
             raise ProviderError(
-                reason, retryable=retryable,
+                reason,
+                retryable=retryable,
                 usage=Usage(input=10, output=5, total_tokens=15),
             )
 
@@ -575,10 +581,14 @@ def test_server_overload_is_retried(tmp_path, monkeypatch):
 @pytest.mark.parametrize("event_type", [TextDeltaEvent, MessageEndEvent])
 @pytest.mark.parametrize("error_type", [RuntimeError, ProviderError])
 def test_subscriber_failure_is_not_retried(event_type, error_type):
-    message = AssistantMessage(content=[TextContent(text="done")], model="fake", provider="fake")
+    message = AssistantMessage(
+        content=[TextContent(text="done")], model="fake", provider="fake"
+    )
     provider = FakeProvider([message])
     session = AgentSession(
-        provider=provider, tools=[], session_manager=SessionManager(in_memory=True),
+        provider=provider,
+        tools=[],
+        session_manager=SessionManager(in_memory=True),
         system_prompt="test",
     )
 
@@ -598,11 +608,16 @@ def test_subscriber_failure_is_not_retried(event_type, error_type):
 
 @pytest.mark.parametrize("error_type", [OSError, ProviderError])
 def test_persistence_failure_is_not_retried(monkeypatch, error_type):
-    message = AssistantMessage(content=[TextContent(text="done")], model="fake", provider="fake")
+    message = AssistantMessage(
+        content=[TextContent(text="done")], model="fake", provider="fake"
+    )
     provider = FakeProvider([message])
     manager = SessionManager(in_memory=True)
     session = AgentSession(
-        provider=provider, tools=[], session_manager=manager, system_prompt="test",
+        provider=provider,
+        tools=[],
+        session_manager=manager,
+        system_prompt="test",
     )
     append = manager.append
 
@@ -637,7 +652,9 @@ def test_unexpected_provider_failure_is_not_retried(during_stream):
 
     provider = BrokenProvider([])
     session = AgentSession(
-        provider=provider, tools=[], session_manager=SessionManager(in_memory=True),
+        provider=provider,
+        tools=[],
+        session_manager=SessionManager(in_memory=True),
         system_prompt="test",
     )
     with pytest.raises(RuntimeError, match="provider bug"):
@@ -656,19 +673,34 @@ def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
         requests.append(args)
         if api == "chat":
             yield {
-                "choices": [{"delta": {}, "finish_reason": "insufficient_system_resource"}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                "choices": [
+                    {"delta": {}, "finish_reason": "insufficient_system_resource"}
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
             }
         else:
-            yield {"type": "response.failed", "response": {
-                "error": {"code": "server_error", "message": "try later"},
-                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
-            }}
+            yield {
+                "type": "response.failed",
+                "response": {
+                    "error": {"code": "server_error", "message": "try later"},
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                },
+            }
 
     provider_type = ChatCompletionsBackend if api == "chat" else ResponsesBackend
     provider = provider_type(api_key="test", transport=transport)
     session = AgentSession(
-        provider=provider, tools=[], session_manager=SessionManager(in_memory=True),
+        provider=provider,
+        tools=[],
+        session_manager=SessionManager(in_memory=True),
         system_prompt="test",
     )
 
@@ -737,7 +769,8 @@ def test_default_guard_blocks_before_execute(tmp_path):
     turn1 = AssistantMessage(
         content=[
             ToolCall(
-                id="c1", name="write",
+                id="c1",
+                name="write",
                 arguments={"path": "/etc/escape.txt", "content": "x"},
             )
         ],
@@ -769,7 +802,8 @@ def test_default_guard_allows_write_inside_cwd(tmp_path):
     turn1 = AssistantMessage(
         content=[
             ToolCall(
-                id="c1", name="write",
+                id="c1",
+                name="write",
                 arguments={"path": "ok.txt", "content": "x"},
             )
         ],
@@ -818,7 +852,9 @@ def test_task_subagent_inherits_tool_guard(tmp_path):
             stop_reason="toolUse",
         ),
         AssistantMessage(
-            content=[TextContent(text="sub report")], model="fake-model", provider="fake"
+            content=[TextContent(text="sub report")],
+            model="fake-model",
+            provider="fake",
         ),
         AssistantMessage(
             content=[TextContent(text="final")], model="fake-model", provider="fake"

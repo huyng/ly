@@ -146,9 +146,7 @@ class MarkdownRenderer:
 
         text = _INLINE_CODE_RE.sub(stash, text)
         text = _BOLD_RE.sub(lambda m: theme.paint(m.group(1), BOLD), text)
-        text = _LINK_RE.sub(
-            lambda m: m.group(1) + theme.dim(f" ({m.group(2)})"), text
-        )
+        text = _LINK_RE.sub(lambda m: m.group(1) + theme.dim(f" ({m.group(2)})"), text)
         if spans:
             text = _TOKEN_RE.sub(lambda m: theme.code(spans[int(m.group(1))]), text)
         return text
@@ -319,7 +317,8 @@ def render_tool_result(
     duration = format_duration(elapsed)
     status = (
         theme.error("✗") + theme.dim(f" error {duration} ↓")
-        if is_error else theme.success("✓") + theme.dim(f" done {duration} ↓")
+        if is_error
+        else theme.success("✓") + theme.dim(f" done {duration} ↓")
     )
     head = theme.dim("├─ ") + status
     foot = "\n" + theme.dim("╰─")
@@ -358,7 +357,9 @@ def render_tool_result(
             theme.dim("│ ") + colorize_diff_line(theme, line) for line in shown
         )
         if len(diff_lines) > MAX_DIFF_LINES:
-            body += "\n" + theme.dim(f"│ … {len(diff_lines) - MAX_DIFF_LINES} more lines")
+            body += "\n" + theme.dim(
+                f"│ … {len(diff_lines) - MAX_DIFF_LINES} more lines"
+            )
         return head + "\n" + counts + "\n" + body + foot
 
     if name == "read":
@@ -383,9 +384,7 @@ def render_tool_result(
         return head + "\n" + theme.dim("│ " + _shorten(summary, width - 2)) + foot
 
     preview = lines[:6]
-    body = "\n".join(
-        theme.dim("│ " + _shorten(line, width - 2)) for line in preview
-    )
+    body = "\n".join(theme.dim("│ " + _shorten(line, width - 2)) for line in preview)
     if len(lines) > 6:
         body += "\n" + theme.dim(f"│ … {len(lines) - 6} more lines")
     return head + (("\n" + body) if body else "") + foot

@@ -136,7 +136,9 @@ def split_index(messages: list[AgentMessage], keep_turns: int) -> int | None:
     The cut always lands on a user message so that tool calls and their
     results stay together.
     """
-    starts = [i for i, message in enumerate(messages) if isinstance(message, UserMessage)]
+    starts = [
+        i for i, message in enumerate(messages) if isinstance(message, UserMessage)
+    ]
     keep = max(keep_turns, 1)
     if len(starts) <= keep:
         return None
@@ -152,7 +154,9 @@ def render_transcript(messages: list[AgentMessage]) -> str:
             parts.append(f"USER: {_clip(message.content, MAX_USER_CHARS)}")
         elif isinstance(message, AssistantMessage):
             if message.text.strip():
-                parts.append(f"ASSISTANT: {_clip(message.text.strip(), MAX_ASSISTANT_CHARS)}")
+                parts.append(
+                    f"ASSISTANT: {_clip(message.text.strip(), MAX_ASSISTANT_CHARS)}"
+                )
             for call in message.tool_calls:
                 arguments = json.dumps(call.arguments, default=str)
                 parts.append(
@@ -203,7 +207,8 @@ def summarize(
             raise RuntimeError("compaction aborted")
         if message.stop_reason != "stop":
             raise RuntimeError(
-                message.error_message or f"summary did not complete: {message.stop_reason}"
+                message.error_message
+                or f"summary did not complete: {message.stop_reason}"
             )
         text = message.text.strip()
         if not text:

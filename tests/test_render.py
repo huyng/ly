@@ -147,7 +147,7 @@ def test_diff_tool_result_is_colorized_and_summarized():
 
 
 def test_bash_call_prints_the_whole_script():
-    script = "for f in *; do\n  echo \"$f\"\ndone"
+    script = 'for f in *; do\n  echo "$f"\ndone'
     out = summarize_tool_call(Theme(False), "bash", {"command": script}, 40)
 
     assert out.splitlines() == ["│ for f in *; do", '│   echo "$f"', "│ done"]
@@ -157,11 +157,11 @@ def test_bash_call_prints_the_whole_script():
 
 
 def test_bash_result_shows_preview_and_exit_code():
-    out = render_tool_result(Theme(False), "bash", "hello\nworld\n[exit code: 0]", False, 1.2)
-    assert "hello" in out
-    assert out == (
-        "├─ ✓ done 1.2s ↓\n│ hello\n│ world\n│ [exit code: 0]\n╰─"
+    out = render_tool_result(
+        Theme(False), "bash", "hello\nworld\n[exit code: 0]", False, 1.2
     )
+    assert "hello" in out
+    assert out == ("├─ ✓ done 1.2s ↓\n│ hello\n│ world\n│ [exit code: 0]\n╰─")
 
 
 def test_tool_result_status_and_output_frame():
@@ -198,8 +198,11 @@ def test_read_result_is_summarized_not_dumped():
 
 def test_error_result_is_red_and_bounded():
     out = render_tool_result(
-        Theme(False), "bash", "Error: boom\n" + "\n".join(f"line {i}" for i in range(20)),
-        True, 0.1,
+        Theme(False),
+        "bash",
+        "Error: boom\n" + "\n".join(f"line {i}" for i in range(20)),
+        True,
+        0.1,
     )
     assert "✗" in out
     assert "Error: boom" in out

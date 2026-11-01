@@ -23,8 +23,6 @@ from ..tools import Tool
 from .base import (
     HTTPBackend,
     ProviderError,
-    _as_int,
-    _close_stream,
 )
 
 
@@ -273,6 +271,14 @@ def _usage_from(payload: Any) -> Usage | None:
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
+def _as_int(value: Any) -> int:
+    return value if isinstance(value, int) else 0
 
 def new_call_id() -> str:
     return f"call_{uuid.uuid4().hex[:24]}"
+
+def _close_stream(stream: Any) -> None:
+    """Close a transport generator if it is closable, ignoring the rest."""
+    close = getattr(stream, "close", None)
+    if callable(close):
+        close()

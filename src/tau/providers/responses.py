@@ -26,7 +26,7 @@ from ..messages import (
     UserMessage,
 )
 from ..tools import Tool
-from .base import HTTPBackend, ProviderError, _as_int, _close_stream
+from .base import HTTPBackend, ProviderError
 
 
 class ResponsesBackend(HTTPBackend):
@@ -265,3 +265,12 @@ def _text(value: Any) -> str:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+def _close_stream(stream: Any) -> None:
+    """Close a transport generator if it is closable, ignoring the rest."""
+    close = getattr(stream, "close", None)
+    if callable(close):
+        close()
+
+def _as_int(value: Any) -> int:
+    return value if isinstance(value, int) else 0

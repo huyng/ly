@@ -141,6 +141,55 @@ def test_function_call_deltas_become_a_tool_call():
     assert call.arguments == {"path": "a.py"}
 
 
+def test_function_calls_preserve_stream_order_not_item_id_order():
+    chunks = []
+    for index, item_id in enumerate(["fc_z", "fc_a"]):
+        chunks.append(event(
+            "response.output_item.added",
+            output_index=index,
+            item={
+                "id": item_id, "type": "function_call",
+                "call_id": f"call_{index}", "name": "read",
+            },
+        ))
+        chunks.append(event(
+            "response.function_call_arguments.delta",
+            item_id=item_id, delta=json.dumps({"path": f"{index}.py"}),
+        ))
+    chunks.append(event("response.completed", response={"status": "completed"}))
+    provider, _ = make_provider_for(chunks)
+
+    _, message = collect(provider, [UserMessage(content="read files")])
+
+    assert [call.id for call in message.tool_calls] == ["call_0", "call_1"]
+    assert [call.arguments for call in message.tool_calls] == [
+        {"path": "0.py"}, {"path": "1.py"},
+    ]
+
+
+@pytest.mark.parametrize("final_arguments", ['{"path": "a.py"}', None])
+def test_done_item_prefers_complete_arguments_and_falls_back_to_deltas(final_arguments):
+    chunks = [
+        event("response.output_item.added", item={
+            "id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "read",
+        }),
+        event(
+            "response.function_call_arguments.delta", item_id="fc_1",
+            delta='{"path":' if final_arguments else '{"path": "a.py"}',
+        ),
+        event("response.output_item.done", item={
+            "id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "read",
+            **({"arguments": final_arguments} if final_arguments is not None else {}),
+        }),
+        event("response.completed", response={"status": "completed"}),
+    ]
+    provider, _ = make_provider_for(chunks)
+
+    _, message = collect(provider, [UserMessage(content="read a.py")])
+
+    assert message.tool_calls[0].arguments == {"path": "a.py"}
+
+
 def test_done_item_supplies_arguments_the_deltas_missed():
     chunks = [
         event(

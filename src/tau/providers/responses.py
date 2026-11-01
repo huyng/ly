@@ -11,6 +11,7 @@ which is why this is a backend of its own rather than a branch in
 
 import json
 import threading
+from collections import OrderedDict
 from collections.abc import Generator, Mapping
 from typing import Any
 
@@ -128,7 +129,7 @@ class ResponsesProvider(HTTPProvider):
 
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
-        calls: dict[str, dict[str, str]] = {}
+        calls: OrderedDict[str, dict[str, str]] = OrderedDict()
         usage = Usage()
         stop_reason = "stop"
         failure_reason: str | None = None
@@ -162,14 +163,13 @@ class ResponsesProvider(HTTPProvider):
                     if call is not None:
                         call["arguments"] += _text(chunk.get("delta"))
                 elif kind == "response.output_item.done":
-                    # The done event repeats the whole call, so it repairs a name
-                    # or full argument string the deltas never delivered.
+                    # The done event is authoritative: deltas may be incomplete.
                     item = _mapping(chunk.get("item"))
                     if item.get("type") == "function_call":
                         call = calls.setdefault(_item_key(chunk, item), _call_entry(item))
                         call["id"] = call["id"] or _text(item.get("call_id"))
                         call["name"] = call["name"] or _text(item.get("name"))
-                        call["arguments"] = call["arguments"] or _text(item.get("arguments"))
+                        call["arguments"] = _text(item.get("arguments")) or call["arguments"]
                 elif kind == "response.completed":
                     usage = _usage_from(_mapping(chunk.get("response")).get("usage")) or usage
                 elif kind == "response.incomplete":
@@ -194,8 +194,7 @@ class ResponsesProvider(HTTPProvider):
         content: list[TextContent | ToolCall] = []
         if text := "".join(text_parts):
             content.append(TextContent(text=text))
-        for key in sorted(calls):
-            call = calls[key]
+        for key, call in calls.items():
             try:
                 arguments = json.loads(call["arguments"] or "{}")
             except json.JSONDecodeError:

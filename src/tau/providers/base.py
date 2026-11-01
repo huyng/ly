@@ -116,12 +116,10 @@ class HTTPBackend:
             "api.deepseek.com": "deepseek",
             "api.z.ai": "zai",
         }.get(hostname, hostname)
-        api_key = api_key or os.environ.get("TAU_API_KEY")
-        if "deepseek" in self.base_url:
-            api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self.api_key = api_key or os.environ.get("TAU_API_KEY")
         self.transport = transport or stream_chunk_transport
         self.timeout = timeout
+
         if not self.api_key:
             # Raised here, at construction, so callers fail before any work.
             raise MissingCredentialsError()
@@ -236,12 +234,4 @@ def _is_retryable_status(code: int | None) -> bool:
     return code in RETRYABLE_STATUSES or 500 <= code <= 599
 
 
-def _as_int(value: Any) -> int:
-    return value if isinstance(value, int) else 0
 
-
-def _close_stream(stream: Any) -> None:
-    """Close a transport generator if it is closable, ignoring the rest."""
-    close = getattr(stream, "close", None)
-    if callable(close):
-        close()

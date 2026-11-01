@@ -18,9 +18,8 @@ class Tool(ABC):
     parameters: ClassVar[dict[str, Any]] = {"type": "object", "properties": {}}
 
     @abstractmethod
-    def execute(self, **kwargs: Any) -> ToolResult:
-        """Execute the tool with validated JSON-schema arguments.
+    def execute(self, *args: Any, **kwargs: Any) -> ToolResult:
+        """Execute arguments validated against the tool's JSON schema.
 
-        Subclasses narrow this to the arguments they need; callers dispatch
-        with arbitrary ``**arguments`` from the model.
+        The unconstrained signature lets subclasses define their own parameters.
         """

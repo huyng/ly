@@ -18,14 +18,10 @@ from tau.messages import (
     deserialize_message,
     serialize_message,
 )
-from tau.providers import (
-    ChatCompletionsBackend,
-    MissingBaseURLError,
-    MissingCredentialsError,
-    Provider,
-    ProviderError,
-    stream_chunk_transport,
-)
+from tau.providers import Provider, ProviderError
+from tau.providers.backend import ChatCompletionsBackend
+from tau.providers.errors import MissingBaseURLError, MissingCredentialsError
+from tau.providers.sse import stream_chunk_transport
 from tau.tools import Tool
 
 

@@ -32,7 +32,8 @@ from .events import (
     ToolNameEvent,
 )
 from .prompts import build_system_prompt, context_files
-from .providers import MissingCredentialsError, Provider
+from .providers import Provider
+from .providers.errors import MissingCredentialsError
 from .render import (
     GutterWriter,
     MarkdownRenderer,

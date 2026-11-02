@@ -10,22 +10,12 @@ case of the other:
 
 Supporting modules, from the wire upward: ``sse`` (one POST, decoded chunks),
 ``backend`` (the transport and every backend that speaks it), ``provider``
-(config, and the choice of backend), ``errors`` (failures).
+(config, and the choice of backend), ``errors`` (failures). Import anything
+else from those modules directly: this package exposes only ``Provider`` and
+``ProviderError``.
 """
 
-from .backend import ChatCompletionsBackend, ModelBackend, ResponsesBackend
-from .errors import MissingBaseURLError, MissingCredentialsError, ProviderError
-from .provider import DEFAULT_MODEL, Provider
-from .sse import stream_chunk_transport
+from .errors import ProviderError
+from .provider import Provider
 
-__all__ = [
-    "ChatCompletionsBackend",
-    "DEFAULT_MODEL",
-    "MissingBaseURLError",
-    "MissingCredentialsError",
-    "ModelBackend",
-    "Provider",
-    "ProviderError",
-    "ResponsesBackend",
-    "stream_chunk_transport",
-]
+__all__ = ["Provider", "ProviderError"]

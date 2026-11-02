@@ -24,7 +24,8 @@ from tau.messages import (
     Usage,
     UserMessage,
 )
-from tau.providers import ModelBackend, Provider, ProviderError
+from tau.providers import Provider, ProviderError
+from tau.providers.backend import ModelBackend
 from tau.session import SessionManager
 from tau.tools import Tool, ToolResult
 from tau.tools.task import TaskTool

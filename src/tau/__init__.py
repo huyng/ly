@@ -36,7 +36,8 @@ def create_agent_session(
     used.
     """
     from .prompts import build_system_prompt
-    from .providers import DEFAULT_MODEL, Provider
+    from .providers import Provider
+    from .providers.provider import DEFAULT_MODEL
 
     provider = Provider(
         api=api,

@@ -13,12 +13,8 @@ from tau.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from tau.providers import (
-    ChatCompletionsBackend,
-    Provider,
-    ProviderError,
-    ResponsesBackend,
-)
+from tau.providers import Provider, ProviderError
+from tau.providers.backend import ChatCompletionsBackend, ResponsesBackend
 from tau.tools import Tool
 
 

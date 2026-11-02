@@ -97,7 +97,7 @@ class ModelBackendProtocol(Protocol):
     ) -> Generator[ProviderEvent, None, AssistantMessage]: ...
 
 
-class HTTPBackend:
+class Provider:
     """Configuration and headers for one OpenAI-flavoured endpoint.
 
     Configuration precedence: explicit arguments, then TAU_* environment
@@ -109,13 +109,13 @@ class HTTPBackend:
         model: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        transport: Transport | None = None,
+        reader: Transport | None = None,
         timeout: float = DEFAULT_TIMEOUT,
     ):
         self.model = model or os.environ.get("TAU_MODEL", "gpt-4.1")
         self.api_key = api_key or os.environ.get("TAU_API_KEY")
         self.base_url = base_url or os.environ.get("TAU_BASE_URL", "")
-        self.transport = transport or stream_chunk_transport
+        self.reader = reader or stream_chunk_transport
         self.timeout = timeout
 
         if not self.api_key:

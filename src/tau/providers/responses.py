@@ -26,10 +26,10 @@ from ..messages import (
     UserMessage,
 )
 from ..tools import Tool
-from .base import HTTPBackend, ProviderError
+from .base import Provider, ProviderError
 
 
-class ResponsesBackend(HTTPBackend):
+class ResponsesBackend(Provider):
     """Streaming provider for OpenAI's /v1/responses endpoint."""
 
     api = "openai-responses"
@@ -114,7 +114,7 @@ class ResponsesBackend(HTTPBackend):
     ) -> Generator[ProviderEvent, None, AssistantMessage]:
         """Stream one turn; yields events, returns the AssistantMessage."""
         url = self.base_url.rstrip("/") + "/responses"
-        chunks = self.transport(
+        chunks = self.reader(
             url,
             self._headers(),
             self._request_body(system_prompt, messages, tools),

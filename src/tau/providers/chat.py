@@ -21,7 +21,7 @@ from ..messages import (
 )
 from ..tools import Tool
 from .base import (
-    HTTPBackend,
+    Provider,
     ProviderError,
 )
 
@@ -35,7 +35,7 @@ _STOP_REASONS = {
 }
 
 
-class ChatCompletionsBackend(HTTPBackend):
+class ChatCompletionsBackend(Provider):
     """Streaming provider for any OpenAI-compatible chat-completions endpoint."""
 
     api = "openai-completions"
@@ -142,7 +142,7 @@ class ChatCompletionsBackend(HTTPBackend):
     ) -> Generator[ProviderEvent, None, AssistantMessage]:
         """Stream one turn; yields events, returns the AssistantMessage."""
         url = self.base_url.rstrip("/") + "/chat/completions"
-        chunks = self.transport(
+        chunks = self.reader(
             url,
             self._headers(),
             self._request_body(system_prompt, messages, tools),

@@ -84,7 +84,7 @@ def make_provider(
         model=model,
         base_url="https://api.deepseek.com",
         api_key="test-key",
-        transport=transport,
+        reader=transport,
     )
     return provider, transport
 
@@ -155,7 +155,7 @@ def test_reasoning_is_not_sent_to_non_deepseek_providers():
         model="glm-4.6",
         base_url="https://api.z.ai/api/paas/v4/",
         api_key="test-key",
-        transport=FakeTransport([]),
+        reader=FakeTransport([]),
     )
     message = AssistantMessage(
         content=[TextContent(text="hi")],
@@ -174,7 +174,7 @@ def test_reasoning_passthrough_can_be_forced_with_env(monkeypatch):
         model="glm-4.6",
         base_url="https://api.z.ai/api/paas/v4/",
         api_key="test-key",
-        transport=FakeTransport([]),
+        reader=FakeTransport([]),
     )
     message = AssistantMessage(
         content=[TextContent(text="hi")],
@@ -426,7 +426,7 @@ def test_request_includes_tool_schemas_when_present():
 def test_response_records_api_and_model():
     backend = ChatCompletionsBackend(
         api_key="test",
-        transport=FakeTransport([chunk(content="ok")]),
+        reader=FakeTransport([chunk(content="ok")]),
     )
     _, message = collect(backend, [])
 
@@ -498,7 +498,7 @@ def test_request_omits_an_assistant_message_with_no_content():
         model="deepseek-flash",
         base_url="https://api.deepseek.com",
         api_key="test-key",
-        transport=FakeTransport([]),
+        reader=FakeTransport([]),
     )
     aborted = AssistantMessage(content=[], model="m", stop_reason="aborted")
 
@@ -581,7 +581,7 @@ def test_abort_mid_stream_closes_transport_and_reports_aborted():
                 self.closed = True
 
     transport = AbortingTransport([])
-    provider = ChatCompletionsBackend(model="m", api_key="k", transport=transport)
+    provider = ChatCompletionsBackend(model="m", api_key="k", reader=transport)
     stream = provider.stream(
         "system", [UserMessage(content="hi")], [], abort_event=abort
     )

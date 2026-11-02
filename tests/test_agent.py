@@ -669,7 +669,7 @@ def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
             }
 
     provider_type = ChatCompletionsBackend if api == "chat" else ResponsesBackend
-    provider = provider_type(api_key="test", transport=transport)
+    provider = provider_type(api_key="test", reader=transport)
     session = AgentSession(
         provider=provider,
         tools=[],

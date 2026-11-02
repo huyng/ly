@@ -52,7 +52,7 @@ def make_provider_for(
         model=model,
         base_url="https://api.openai.com/v1",
         api_key="test-key",
-        transport=transport,
+        reader=transport,
     )
     return provider, transport
 

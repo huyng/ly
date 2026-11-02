@@ -12,21 +12,24 @@ from tau.messages import (
     ToolResultMessage,
     Usage,
 )
+from tau.providers import Provider
 from tau.session import SessionManager
 from tau.theme import Theme
 
 
-class FakeProvider:
-    api = "fake"
-    model = "fake-model"
+class ScriptedProvider(Provider):
+    """A provider that never runs: the status line must not reach the model."""
 
-    def stream(self, *_args, **_kwargs):
+    def __init__(self):
+        super().__init__(model="fake-model", base_url="fake", api_key="fake")
+
+    def stream(self, *_args, **_config):
         raise AssertionError("the status line must not call the provider")
 
 
 def make_repl(threshold_tokens: int = 100_000, enabled: bool = True) -> Repl:
     session = AgentSession(
-        provider=FakeProvider(),  # type: ignore[arg-type]
+        provider=ScriptedProvider(),
         tools=[],
         session_manager=SessionManager(in_memory=True),
         system_prompt="system",

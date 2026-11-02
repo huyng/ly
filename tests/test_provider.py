@@ -22,8 +22,8 @@ from tau.providers import (
     ChatCompletionsBackend,
     MissingBaseURLError,
     MissingCredentialsError,
+    Provider,
     ProviderError,
-    ResponsesBackend,
     stream_chunk_transport,
 )
 from tau.tools import Tool
@@ -76,11 +76,9 @@ def collect(provider, messages):
             return events, stop.value
 
 
-def make_provider(
-    chunks, model="deepseek-flash"
-) -> tuple[ChatCompletionsBackend, FakeTransport]:
+def make_provider(chunks, model="deepseek-flash") -> tuple[Provider, FakeTransport]:
     transport = FakeTransport(chunks)
-    provider = ChatCompletionsBackend(
+    provider = Provider(
         model=model,
         base_url="https://api.deepseek.com",
         api_key="test-key",
@@ -100,9 +98,12 @@ class NoopTool(Tool):
         raise NotImplementedError
 
 
-def body_with_tools(provider: ChatCompletionsBackend) -> dict[str, Any]:
+def body_with_tools(provider: Provider) -> dict[str, Any]:
     """The request body tau would send for one turn that has tools."""
-    return json.loads(provider._request_body("system", [], [NoopTool()]))
+    backend = cast(ChatCompletionsBackend, provider.backend)
+    return json.loads(
+        backend._request_body("system", [], [NoopTool()], provider.model, False)
+    )
 
 
 def test_reasoning_is_streamed_stored_and_sent_back():
@@ -139,19 +140,20 @@ def test_reasoning_is_streamed_stored_and_sent_back():
     assert isinstance(restored, AssistantMessage)
     assert restored.reasoning_content == "Let me think."
 
-    request = provider._request_messages(
+    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
         "system",
         [
             UserMessage(content="hi"),
             message,
             ToolResultMessage(tool_call_id="c1", tool_name="read", output="ok"),
         ],
+        provider.pass_reasoning_content,
     )
     assert as_dict(request[2])["reasoning_content"] == "Let me think."
 
 
 def test_reasoning_is_not_sent_to_non_deepseek_providers():
-    provider = ChatCompletionsBackend(
+    provider = Provider(
         model="glm-4.6",
         base_url="https://api.z.ai/api/paas/v4/",
         api_key="test-key",
@@ -163,13 +165,15 @@ def test_reasoning_is_not_sent_to_non_deepseek_providers():
         reasoning_content="private reasoning",
     )
 
-    request = provider._request_messages("system", [message])
+    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
+        "system", [message], provider.pass_reasoning_content
+    )
 
     assert "reasoning_content" not in request[1]
 
 
 def test_reasoning_passthrough_can_be_forced_explicitly():
-    provider = ChatCompletionsBackend(
+    provider = Provider(
         model="glm-4.6",
         base_url="https://api.z.ai/api/paas/v4/",
         api_key="test-key",
@@ -182,7 +186,9 @@ def test_reasoning_passthrough_can_be_forced_explicitly():
         reasoning_content="private reasoning",
     )
 
-    request = provider._request_messages("system", [message])
+    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
+        "system", [message], provider.pass_reasoning_content
+    )
 
     assert as_dict(request[1])["reasoning_content"] == "private reasoning"
 
@@ -198,7 +204,9 @@ def test_reasoning_is_sent_back_alongside_tool_calls():
         reasoning_content="I should read the file.",
     )
 
-    request = provider._request_messages("system", [message])
+    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
+        "system", [message], provider.pass_reasoning_content
+    )
     assistant = as_dict(request[1])
 
     assert assistant["reasoning_content"] == "I should read the file."
@@ -423,16 +431,25 @@ def test_request_includes_tool_schemas_when_present():
     assert transport.body["tools"][0]["function"]["name"] == "noop"
 
 
+def test_model_change_takes_effect_on_the_next_request():
+    provider, transport = make_provider([chunk(finish_reason="stop")])
+    provider.model = "switched-model"
+
+    collect(provider, [UserMessage(content="hi")])
+
+    assert transport.body["model"] == "switched-model"
+
+
 def test_response_records_api_and_model():
-    backend = ChatCompletionsBackend(
+    provider = Provider(
         base_url="https://api.deepseek.com",
         api_key="test",
         reader=FakeTransport([chunk(content="ok")]),
     )
-    _, message = collect(backend, [])
+    _, message = collect(provider, [])
 
     assert message.api == "openai-completions"
-    assert message.model == backend.model
+    assert message.model == provider.model
 
 
 def test_request_omits_reasoning_effort(monkeypatch):
@@ -480,7 +497,7 @@ def test_reasoning_from_finished_turns_is_not_sent_back():
         reasoning_content="recent thoughts",
     )
 
-    request = provider._request_messages(
+    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
         "system",
         [
             UserMessage(content="go"),
@@ -488,6 +505,7 @@ def test_reasoning_from_finished_turns_is_not_sent_back():
             ToolResultMessage(tool_call_id="c1", tool_name="read", output="ok"),
             second,
         ],
+        provider.pass_reasoning_content,
     )
 
     assert "reasoning_content" not in as_dict(request[2])
@@ -495,7 +513,7 @@ def test_reasoning_from_finished_turns_is_not_sent_back():
 
 
 def test_request_omits_an_assistant_message_with_no_content():
-    provider = ChatCompletionsBackend(
+    provider = Provider(
         model="deepseek-flash",
         base_url="https://api.deepseek.com",
         api_key="test-key",
@@ -503,8 +521,10 @@ def test_request_omits_an_assistant_message_with_no_content():
     )
     aborted = AssistantMessage(content=[], model="m", stop_reason="aborted")
 
-    request = provider._request_messages(
-        "system", [UserMessage(content="hi"), aborted, UserMessage(content="again")]
+    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
+        "system",
+        [UserMessage(content="hi"), aborted, UserMessage(content="again")],
+        provider.pass_reasoning_content,
     )
 
     assert [as_dict(entry)["role"] for entry in request] == ["system", "user", "user"]
@@ -519,21 +539,21 @@ def test_stream_that_yields_no_text_has_no_empty_text_block():
     assert message.stop_reason == "stop"
 
 
-@pytest.mark.parametrize("backend", [ChatCompletionsBackend, ResponsesBackend])
-def test_missing_base_url_raises_at_construction(backend):
+@pytest.mark.parametrize("api", ["chat", "responses"])
+def test_missing_base_url_raises_at_construction(api):
     with pytest.raises(MissingBaseURLError) as exc:
-        backend(api_key="test-key")
+        Provider(api=api, api_key="test-key")
     assert "TAU_BASE_URL" in str(exc.value)
     assert exc.value.retryable is False
 
 
-@pytest.mark.parametrize("backend", [ChatCompletionsBackend, ResponsesBackend])
+@pytest.mark.parametrize("api", ["chat", "responses"])
 @pytest.mark.parametrize(
     "base_url", ["https://api.openai.com/v1", "https://api.deepseek.com"]
 )
-def test_missing_credentials_raise_at_construction(backend, base_url):
+def test_missing_credentials_raise_at_construction(api, base_url):
     with pytest.raises(MissingCredentialsError) as exc:
-        backend(base_url=base_url)
+        Provider(api=api, base_url=base_url)
     assert str(exc.value) == "Missing credentials. Set TAU_API_KEY or pass --api-key."
 
 
@@ -552,7 +572,7 @@ def test_abort_mid_stream_closes_transport_and_reports_aborted():
                 self.closed = True
 
     transport = AbortingTransport([])
-    provider = ChatCompletionsBackend(
+    provider = Provider(
         model="m",
         base_url="https://explicit.example/v1",
         api_key="k",

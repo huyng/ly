@@ -36,9 +36,14 @@ def create_agent_session(
     used.
     """
     from .prompts import build_system_prompt
-    from .providers import make_provider
+    from .providers import DEFAULT_MODEL, Provider
 
-    provider = make_provider(api=api, model=model, base_url=base_url, api_key=api_key)
+    provider = Provider(
+        api=api,
+        model=model or DEFAULT_MODEL,
+        base_url=base_url or "",
+        api_key=api_key or "",
+    )
     in_memory = not persistent
     session_manager = SessionManager(in_memory=in_memory)
     return AgentSession(

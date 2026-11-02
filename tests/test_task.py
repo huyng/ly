@@ -18,12 +18,13 @@ from tau.messages import (
     ToolResultMessage,
     Usage,
 )
+from tau.providers import Provider
 from tau.session import SessionManager
 from tau.tools import default_tools
 from tau.tools.task import TaskTool
 
 
-class FakeProvider:
+class ScriptedProvider(Provider):
     """Scripts a sequence of turns and records every request it receives.
 
     The parent and its sub-agent share one provider instance, so `requests`
@@ -31,14 +32,12 @@ class FakeProvider:
     between the parent's tool call and the parent's next turn.
     """
 
-    api = "fake"
-
     def __init__(self, turns: list[AssistantMessage]):
+        super().__init__(model="fake-model", base_url="fake", api_key="fake")
         self.turns = list(turns)
-        self.model = "fake-model"
         self.requests: list[dict[str, Any]] = []
 
-    def stream(self, system_prompt, messages, tools, abort_event=None):
+    def stream(self, system_prompt, messages, tools, abort_event=None, **_config):
         self.requests.append(
             {
                 "system": system_prompt,
@@ -86,7 +85,7 @@ def workspace(tmp_path):
 
 
 def make_session(workspace, turns):
-    provider = FakeProvider(turns)
+    provider = ScriptedProvider(turns)
     session = AgentSession(
         provider=provider,
         tools=default_tools(cwd=str(workspace)),

@@ -32,7 +32,7 @@ from .events import (
     ToolNameEvent,
 )
 from .prompts import build_system_prompt, context_files
-from .providers import MissingCredentialsError, make_provider
+from .providers import MissingCredentialsError, Provider
 from .render import (
     GutterWriter,
     MarkdownRenderer,
@@ -69,7 +69,7 @@ def _flag(name: str) -> bool | None:
 
 
 def make_session(args: argparse.Namespace) -> AgentSession:
-    provider = make_provider(
+    provider = Provider(
         api=args.api,
         model=args.model,
         base_url=args.base_url,

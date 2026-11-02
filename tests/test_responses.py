@@ -15,9 +15,9 @@ from tau.messages import (
 )
 from tau.providers import (
     ChatCompletionsBackend,
+    Provider,
     ProviderError,
     ResponsesBackend,
-    make_provider,
 )
 from tau.tools import Tool
 
@@ -49,11 +49,10 @@ class NoopTool(Tool):
         raise NotImplementedError
 
 
-def make_provider_for(
-    chunks, *, model="gpt-6.1-sol"
-) -> tuple[ResponsesBackend, FakeTransport]:
+def make_provider_for(chunks, *, model="gpt-6.1-sol") -> tuple[Provider, FakeTransport]:
     transport = FakeTransport(chunks)
-    provider = ResponsesBackend(
+    provider = Provider(
+        api="responses",
         model=model,
         base_url="https://api.openai.com/v1",
         api_key="test-key",
@@ -409,20 +408,20 @@ def test_reasoning_summary_uses_default_effort(monkeypatch):
         (" RESPONSES ", "responses"),
     ],
 )
-def test_make_provider_picks_the_backend(api, expected):
-    provider = make_provider(
+def test_provider_picks_the_backend(api, expected):
+    provider = Provider(
         api=api,
         model="m",
         base_url="https://explicit.example/v1",
         api_key="test-key",
     )
 
-    assert isinstance(provider, ResponsesBackend) is (expected == "responses")
+    assert isinstance(provider.backend, ResponsesBackend) is (expected == "responses")
 
 
-def test_make_provider_defaults_to_chat():
-    provider = make_provider(
+def test_provider_defaults_to_chat():
+    provider = Provider(
         model="m", base_url="https://explicit.example/v1", api_key="test-key"
     )
 
-    assert isinstance(provider, ChatCompletionsBackend)
+    assert isinstance(provider.backend, ChatCompletionsBackend)

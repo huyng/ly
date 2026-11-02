@@ -209,10 +209,9 @@ src/tau/
 ├── prompts.py     # system prompt + AGENTS.md discovery
 ├── providers/     # model backends
 │   ├── sse.py     # one POST, urllib + SSE, decoded into JSON chunks
-│   ├── endpoint.py # shared interface and endpoint configuration
+│   ├── backend.py # ModelBackend + the chat-completions and responses backends
+│   ├── provider.py # Provider: config, and the choice of backend
 │   ├── errors.py  # ProviderError, and when a failure is worth retrying
-│   ├── chat.py    # /chat/completions backend
-│   └── responses.py # /v1/responses backend
 ├── render.py      # Markdown + unified-diff rendering
 ├── session.py     # JSONL session persistence (tree-shaped)
 ├── spinner.py     # waiting-for-first-chunk spinner

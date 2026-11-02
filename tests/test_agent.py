@@ -24,23 +24,24 @@ from tau.messages import (
     Usage,
     UserMessage,
 )
-from tau.providers import ChatCompletionsBackend, ProviderError, ResponsesBackend
+from tau.providers import ModelBackend, Provider, ProviderError
 from tau.session import SessionManager
 from tau.tools import Tool, ToolResult
 from tau.tools.task import TaskTool
 
 
-class FakeProvider:
+class FakeBackend(ModelBackend):
     """Scripts a sequence of turns: each turn is an AssistantMessage."""
 
     api = "fake"
 
     def __init__(self, turns: list[AssistantMessage]):
+        super().__init__()
         self.turns = list(turns)
         self.model = "fake-model"
         self.requests: list[tuple[str, list, list]] = []
 
-    def stream(self, system_prompt, messages, tools, abort_event=None):
+    def stream(self, system_prompt, messages, tools, abort_event=None, **_config):
         self.requests.append((system_prompt, list(messages), list(tools)))
         turn = self.turns.pop(0)
 
@@ -52,6 +53,19 @@ class FakeProvider:
             return turn
 
         return generate()
+
+
+class ScriptedProvider(Provider):
+    """A real Provider whose backend is scripted instead of networked."""
+
+    def __init__(self, turns: list[AssistantMessage]):
+        super().__init__(model="fake-model", base_url="fake", api_key="fake")
+        self.script: FakeBackend = FakeBackend(turns)
+        self.backend: ModelBackend = self.script
+
+    @property
+    def requests(self):
+        return self.script.requests
 
 
 class EchoTool(Tool):
@@ -101,7 +115,7 @@ def make_session(tmp_path, turns) -> tuple[AgentSession, EchoTool, SessionManage
     manager.new_session()
     tool = EchoTool()
     session = AgentSession(
-        provider=FakeProvider(turns),
+        provider=ScriptedProvider(turns),
         tools=[tool],
         session_manager=manager,
         system_prompt="test system prompt",
@@ -151,7 +165,7 @@ def test_agent_loop_tool_call_and_final_text(tmp_path):
     assert session.last_assistant_text() == "all done"
 
     # the second request included the tool result
-    provider = cast(FakeProvider, session.provider)
+    provider = cast(ScriptedProvider, session.provider)
     _, second_request_messages, _ = provider.requests[1]
     assert isinstance(second_request_messages[-1], ToolResultMessage)
     assert second_request_messages[-1].output == "echo: hello"
@@ -281,7 +295,7 @@ def test_aborted_tool_stream_answers_every_call_before_next_prompt(tmp_path):
         stop_reason="aborted",
     )
     reply = AssistantMessage(content=[TextContent(text="resumed")], model="fake-model")
-    provider = FakeProvider([turn, reply])
+    provider = ScriptedProvider([turn, reply])
     tool = EchoTool()
     session = AgentSession(
         provider=provider,
@@ -336,7 +350,7 @@ def test_interrupt_inside_a_tool_answers_every_call(tmp_path):
     manager = SessionManager(directory=tmp_path)
     manager.new_session()
     session = AgentSession(
-        provider=FakeProvider([turn]),
+        provider=ScriptedProvider([turn]),
         tools=[InterruptingTool()],
         session_manager=manager,
         system_prompt="test system prompt",
@@ -352,11 +366,12 @@ def test_interrupt_inside_a_tool_answers_every_call(tmp_path):
 
 
 def test_abort_during_retry_stops_without_another_request(tmp_path):
-    class FailingProvider:
+    class FailingProvider(ScriptedProvider):
         api = "fake"
         model = "fake-model"
 
         def __init__(self):
+            super().__init__([])
             self.calls = 0
 
         def stream(self, *_args, **_kwargs):
@@ -386,11 +401,12 @@ def test_abort_during_retry_stops_without_another_request(tmp_path):
 def test_permanent_error_is_not_retried(tmp_path):
     """A 401 must fail once, immediately — not three times over 3 seconds."""
 
-    class UnauthorizedProvider:
+    class UnauthorizedProvider(ScriptedProvider):
         api = "fake"
         model = "fake-model"
 
         def __init__(self):
+            super().__init__([])
             self.calls = 0
 
         def stream(self, *_args, **_kwargs):
@@ -423,11 +439,12 @@ def test_permanent_error_is_not_retried(tmp_path):
 def test_transient_error_is_retried(tmp_path, monkeypatch):
     monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
 
-    class FlakyProvider:
+    class FlakyProvider(ScriptedProvider):
         api = "fake"
         model = "fake-model"
 
         def __init__(self):
+            super().__init__([])
             self.calls = 0
 
         def stream(self, *_args, **_kwargs):
@@ -455,11 +472,12 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
     MessageStartEvent per attempt to reset a half-rendered message."""
     monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
 
-    class FlakyProvider:
+    class FlakyProvider(ScriptedProvider):
         api = "fake"
         model = "fake-model"
 
         def __init__(self):
+            super().__init__([])
             self.calls = 0
 
         def stream(self, *_args, **_kwargs):
@@ -512,11 +530,12 @@ def test_create_agent_session_binds_tools_to_the_requested_cwd(tmp_path):
 
 
 def failing_provider(reason, *, retryable=False):
-    class Provider:
+    class FailingProvider(ScriptedProvider):
         api = "fake"
         model = "fake-model"
 
         def __init__(self):
+            super().__init__([])
             self.calls = 0
 
         def stream(self, *_args, **_kwargs):
@@ -527,7 +546,7 @@ def failing_provider(reason, *, retryable=False):
                 usage=Usage(input=10, output=5, total_tokens=15),
             )
 
-    return Provider()
+    return FailingProvider()
 
 
 def test_content_filter_is_not_retried(tmp_path, monkeypatch):
@@ -563,7 +582,7 @@ def test_server_overload_is_retried(tmp_path, monkeypatch):
 @pytest.mark.parametrize("error_type", [RuntimeError, ProviderError])
 def test_subscriber_failure_is_not_retried(event_type, error_type):
     message = AssistantMessage(content=[TextContent(text="done")], model="fake")
-    provider = FakeProvider([message])
+    provider = ScriptedProvider([message])
     session = AgentSession(
         provider=provider,
         tools=[],
@@ -588,7 +607,7 @@ def test_subscriber_failure_is_not_retried(event_type, error_type):
 @pytest.mark.parametrize("error_type", [OSError, ProviderError])
 def test_persistence_failure_is_not_retried(monkeypatch, error_type):
     message = AssistantMessage(content=[TextContent(text="done")], model="fake")
-    provider = FakeProvider([message])
+    provider = ScriptedProvider([message])
     manager = SessionManager(in_memory=True)
     session = AgentSession(
         provider=provider,
@@ -613,7 +632,7 @@ def test_persistence_failure_is_not_retried(monkeypatch, error_type):
 
 @pytest.mark.parametrize("during_stream", [False, True])
 def test_unexpected_provider_failure_is_not_retried(during_stream):
-    class BrokenProvider(FakeProvider):
+    class BrokenProvider(ScriptedProvider):
         calls = 0
 
         def stream(self, *_args, **_kwargs):
@@ -672,9 +691,11 @@ def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
                 },
             }
 
-    provider_type = ChatCompletionsBackend if api == "chat" else ResponsesBackend
-    provider = provider_type(
-        base_url="https://explicit.example/v1", api_key="test", reader=transport
+    provider = Provider(
+        api=api,
+        base_url="https://explicit.example/v1",
+        api_key="test",
+        reader=transport,
     )
     session = AgentSession(
         provider=provider,
@@ -755,7 +776,7 @@ def test_default_guard_blocks_before_execute(tmp_path):
     turn2 = AssistantMessage(content=[TextContent(text="done")], model="fake-model")
     tool = SpyWriteTool()
     session = AgentSession(
-        provider=FakeProvider([turn1, turn2]),
+        provider=ScriptedProvider([turn1, turn2]),
         tools=[tool],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="test system prompt",
@@ -785,7 +806,7 @@ def test_default_guard_allows_write_inside_cwd(tmp_path):
     turn2 = AssistantMessage(content=[TextContent(text="done")], model="fake-model")
     tool = SpyWriteTool()
     session = AgentSession(
-        provider=FakeProvider([turn1, turn2]),
+        provider=ScriptedProvider([turn1, turn2]),
         tools=[tool],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="test system prompt",
@@ -825,7 +846,7 @@ def test_task_subagent_inherits_tool_guard(tmp_path):
         AssistantMessage(content=[TextContent(text="final")], model="fake-model"),
     ]
     session = AgentSession(
-        provider=FakeProvider(turns),
+        provider=ScriptedProvider(turns),
         tools=[TaskTool(cwd=str(tmp_path))],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="parent prompt",

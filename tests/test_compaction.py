@@ -30,19 +30,19 @@ from tau.messages import (
     Usage,
     UserMessage,
 )
-from tau.providers import ProviderError
+from tau.providers import Provider, ProviderError
 from tau.session import SessionManager
 
 
-class FakeProvider:
-    api = "fake"
+class ScriptedProvider(Provider):
+    """Scripts a sequence of turns and records every request it receives."""
 
     def __init__(self, turns: list[AssistantMessage]):
+        super().__init__(model="fake-model", base_url="fake", api_key="fake")
         self.turns = list(turns)
-        self.model = "fake-model"
         self.requests: list[dict[str, Any]] = []
 
-    def stream(self, system_prompt, messages, tools, abort_event=None):
+    def stream(self, system_prompt, messages, tools, abort_event=None, **_config):
         self.requests.append(
             {
                 "system": system_prompt,
@@ -111,8 +111,8 @@ def build_history(manager, turns: int, usage_input: int = 0) -> None:
 
 def make_session(
     turns: list[AssistantMessage], **overrides
-) -> tuple[AgentSession, FakeProvider]:
-    provider = FakeProvider(turns)
+) -> tuple[AgentSession, ScriptedProvider]:
+    provider = ScriptedProvider(turns)
     config = CompactionConfig(
         enabled=True,
         threshold_tokens=overrides.pop("threshold_tokens", 1),
@@ -377,8 +377,8 @@ def test_cancelled_compaction_stops_the_run(stop_reason):
     build_history(session.session_manager, 3)
     current_id = session.session_manager.current_id
 
-    class CancellingProvider(FakeProvider):
-        def stream(self, system_prompt, messages, tools, abort_event=None):
+    class CancellingProvider(ScriptedProvider):
+        def stream(self, system_prompt, messages, tools, abort_event=None, **_config):
             result = yield from super().stream(
                 system_prompt, messages, tools, abort_event
             )
@@ -440,7 +440,7 @@ def test_summary_usage_counts_toward_session_usage():
 
 
 def test_failed_summary_usage_counts_toward_session_usage():
-    class FailingProvider(FakeProvider):
+    class FailingProvider(ScriptedProvider):
         def stream(self, *_args, **_kwargs):
             raise ProviderError(
                 "summary failed",
@@ -495,7 +495,7 @@ def test_compact_returns_false_with_too_few_turns():
 
 
 def test_summarize_does_not_request_a_batch_after_cancellation():
-    provider = FakeProvider([reply("SUM")])
+    provider = ScriptedProvider([reply("SUM")])
     abort_event = threading.Event()
     abort_event.set()
 
@@ -508,7 +508,7 @@ def test_summarize_does_not_request_a_batch_after_cancellation():
 
 
 def test_summarize_rejects_empty_summary():
-    provider = FakeProvider([reply("   ")])
+    provider = ScriptedProvider([reply("   ")])
     with pytest.raises(RuntimeError, match="empty summary"):
         summarize(provider, [UserMessage(content="hi")], CompactionConfig())
 

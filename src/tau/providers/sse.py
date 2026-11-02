@@ -1,25 +1,19 @@
-"""Provider plumbing: the protocol, errors, configuration, and the SSE transport.
+"""The wire layer: one HTTP POST, decoded into a stream of JSON chunks.
 
-The backends differ in how they shape a request and how they read the stream,
-so each lives in its own module. What they share is an endpoint's configuration
-(model, base URL, key, timeout), its headers, and the wire-level POST that
-turns a body into SSE chunks — that is `HTTPBackend` and
-`stream_chunk_transport` here.
+Everything here is about bytes and status codes, not about which API is being
+spoken. The backends build a body and read the chunks; this module is the only
+place that knows the request is urllib and the response is server-sent events.
 """
 
 import http.client
 import json
-import os
-import threading
 import urllib.error
 import urllib.request
-from collections.abc import Generator, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import closing
 from typing import Any, Protocol
 
-from ..events import ProviderEvent
-from ..messages import AgentMessage, AssistantMessage, Usage
-from ..tools import Tool
+from .errors import ProviderError
 
 #: A parsed `data:` payload from the event stream.
 Chunk = Mapping[str, Any]
@@ -40,111 +34,6 @@ class Transport(Protocol):
         body: bytes,
         timeout: float = ...,
     ) -> ChunkStream: ...
-
-
-class ProviderError(RuntimeError):
-    """A failure talking to the endpoint.
-
-    ``retryable`` distinguishes "try again in a moment" (rate limits, 5xx,
-    dropped connections) from "this will never succeed" (bad key, bad request,
-    content filtered). Permanent failures end the turn without another request.
-    ``usage`` preserves billed tokens when a streamed response ends in failure.
-    """
-
-    def __init__(
-        self, message: str, *, retryable: bool = True, usage: Usage | None = None
-    ):
-        super().__init__(message)
-        self.retryable = retryable
-        self.usage = usage
-
-
-class MissingCredentialsError(ProviderError):
-    """No API key was configured for the endpoint.
-
-    Built at construction time, so the message must say how to supply a key.
-    """
-
-    def __init__(self):
-        super().__init__(
-            "Missing credentials. Set TAU_API_KEY or pass --api-key.", retryable=False
-        )
-
-
-class MissingBaseURLError(ProviderError):
-    def __init__(self):
-        super().__init__("Missing Base URL for api. Set TAU_BASE_URL", retryable=False)
-
-
-class ModelBackendProtocol(Protocol):
-    """What the agent needs from a model runtime; the backends implement it.
-
-    Tests and other hosts can satisfy it with a stand-in instead of a real
-    transport. ``stream`` yields events and returns the completed message via
-    StopIteration.value. Endpoint failures raise `ProviderError` with explicit
-    retryability; unexpected implementation errors propagate without retries.
-    """
-
-    api: str
-    model: str
-
-    def stream(
-        self,
-        system_prompt: str,
-        messages: list[AgentMessage],
-        tools: list[Tool],
-        abort_event: threading.Event | None = None,
-    ) -> Generator[ProviderEvent, None, AssistantMessage]: ...
-
-
-class Provider:
-    """Configuration and headers for one OpenAI-flavoured endpoint.
-
-    Configuration precedence: explicit arguments, then TAU_* environment
-    variables, then defaults.
-    """
-
-    def __init__(
-        self,
-        model: str | None = None,
-        base_url: str | None = None,
-        api_key: str | None = None,
-        reader: Transport | None = None,
-        timeout: float = DEFAULT_TIMEOUT,
-    ):
-        self.model = model or os.environ.get("TAU_MODEL", "gpt-4.1")
-        self.api_key = api_key or os.environ.get("TAU_API_KEY")
-        self.base_url = base_url or os.environ.get("TAU_BASE_URL", "")
-        self.reader = reader or stream_chunk_transport
-        self.timeout = timeout
-
-        if not self.api_key:
-            # Raised here, at construction, so callers fail before any work.
-            raise MissingCredentialsError()
-
-        if not self.base_url:
-            raise MissingBaseURLError()
-
-        # DeepSeek thinking mode requires reasoning_content to be echoed back
-        # when tools are present. Other providers (e.g. z.ai) should keep the
-        # previous behavior unless explicitly opted in.
-        self.pass_reasoning_content = "deepseek" in self.base_url
-        override = os.environ.get("TAU_PASS_REASONING_CONTENT")
-        if override is not None:
-            self.pass_reasoning_content = override.strip().lower() not in (
-                "0",
-                "false",
-                "no",
-                "off",
-            )
-
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-            "Accept-Encoding": "identity",
-        }
 
 
 def stream_chunk_transport(

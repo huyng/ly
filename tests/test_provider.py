@@ -20,12 +20,12 @@ from tau.messages import (
 )
 from tau.providers import (
     ChatCompletionsBackend,
+    MissingBaseURLError,
     MissingCredentialsError,
     ProviderError,
     ResponsesBackend,
     stream_chunk_transport,
 )
-from tau.providers.base import MissingBaseURLError
 from tau.tools import Tool
 
 
@@ -168,13 +168,13 @@ def test_reasoning_is_not_sent_to_non_deepseek_providers():
     assert "reasoning_content" not in request[1]
 
 
-def test_reasoning_passthrough_can_be_forced_with_env(monkeypatch):
-    monkeypatch.setenv("TAU_PASS_REASONING_CONTENT", "1")
+def test_reasoning_passthrough_can_be_forced_explicitly():
     provider = ChatCompletionsBackend(
         model="glm-4.6",
         base_url="https://api.z.ai/api/paas/v4/",
         api_key="test-key",
         reader=FakeTransport([]),
+        pass_reasoning_content=True,
     )
     message = AssistantMessage(
         content=[TextContent(text="hi")],
@@ -425,6 +425,7 @@ def test_request_includes_tool_schemas_when_present():
 
 def test_response_records_api_and_model():
     backend = ChatCompletionsBackend(
+        base_url="https://api.deepseek.com",
         api_key="test",
         reader=FakeTransport([chunk(content="ok")]),
     )
@@ -519,51 +520,21 @@ def test_stream_that_yields_no_text_has_no_empty_text_block():
 
 
 @pytest.mark.parametrize("backend", [ChatCompletionsBackend, ResponsesBackend])
-@pytest.mark.parametrize("base_url", [None, "https://explicit.example/v1"])
-@pytest.mark.parametrize("env_url", [None, "https://tau.example/v1"])
-def test_base_url_precedence(monkeypatch, backend, base_url, env_url):
-    monkeypatch.delenv("TAU_BASE_URL", raising=False)
-    if env_url is not None:
-        monkeypatch.setenv("TAU_BASE_URL", env_url)
-    monkeypatch.setenv("OPENAI_BASE_URL", "https://ignored.example/v1")
-
-    if base_url is None and env_url is None:
-        with pytest.raises(MissingBaseURLError) as exc:
-            backend(api_key="test-key")
-        assert "TAU_BASE_URL" in str(exc.value)
-        assert exc.value.retryable is False
-    else:
-        provider = backend(base_url=base_url, api_key="test-key")
-        assert provider.base_url == (base_url or env_url)
+def test_missing_base_url_raises_at_construction(backend):
+    with pytest.raises(MissingBaseURLError) as exc:
+        backend(api_key="test-key")
+    assert "TAU_BASE_URL" in str(exc.value)
+    assert exc.value.retryable is False
 
 
 @pytest.mark.parametrize("backend", [ChatCompletionsBackend, ResponsesBackend])
 @pytest.mark.parametrize(
     "base_url", ["https://api.openai.com/v1", "https://api.deepseek.com"]
 )
-def test_missing_credentials_raise_at_construction(monkeypatch, backend, base_url):
-    monkeypatch.delenv("TAU_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "ignored-openai-key")
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "ignored-deepseek-key")
-
+def test_missing_credentials_raise_at_construction(backend, base_url):
     with pytest.raises(MissingCredentialsError) as exc:
         backend(base_url=base_url)
     assert str(exc.value) == "Missing credentials. Set TAU_API_KEY or pass --api-key."
-
-
-@pytest.mark.parametrize("backend", [ChatCompletionsBackend, ResponsesBackend])
-@pytest.mark.parametrize(
-    "base_url", ["https://api.openai.com/v1", "https://api.deepseek.com"]
-)
-@pytest.mark.parametrize("api_key", [None, "explicit-key"])
-def test_api_key_precedence(monkeypatch, backend, base_url, api_key):
-    monkeypatch.setenv("TAU_API_KEY", "tau-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "ignored-openai-key")
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "ignored-deepseek-key")
-
-    provider = backend(base_url=base_url, api_key=api_key)
-
-    assert provider.api_key == (api_key or "tau-key")
 
 
 def test_abort_mid_stream_closes_transport_and_reports_aborted():
@@ -581,7 +552,12 @@ def test_abort_mid_stream_closes_transport_and_reports_aborted():
                 self.closed = True
 
     transport = AbortingTransport([])
-    provider = ChatCompletionsBackend(model="m", api_key="k", reader=transport)
+    provider = ChatCompletionsBackend(
+        model="m",
+        base_url="https://explicit.example/v1",
+        api_key="k",
+        reader=transport,
+    )
     stream = provider.stream(
         "system", [UserMessage(content="hi")], [], abort_event=abort
     )

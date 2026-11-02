@@ -87,3 +87,49 @@ def test_status_line_omits_the_threshold_when_compaction_is_disabled(capsys):
     out = capsys.readouterr().out
     assert "ctx 82,000" in out
     assert "100,000" not in out
+
+
+# -- environment variables: the CLI is the only place that reads them ---------
+
+
+def test_env_variables_become_argument_defaults(monkeypatch):
+    from tau.cli import build_parser
+
+    monkeypatch.setenv("TAU_MODEL", "deepseek-flash")
+    monkeypatch.setenv("TAU_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("TAU_API_KEY", "env-key")
+    monkeypatch.setenv("TAU_API", "responses")
+
+    args = build_parser().parse_args([])
+
+    assert args.model == "deepseek-flash"
+    assert args.base_url == "https://api.deepseek.com"
+    assert args.api_key == "env-key"
+    assert args.api == "responses"
+
+
+def test_flags_override_env_variables(monkeypatch):
+    from tau.cli import build_parser
+
+    monkeypatch.setenv("TAU_BASE_URL", "https://env.example/v1")
+    monkeypatch.setenv("TAU_API_KEY", "env-key")
+
+    args = build_parser().parse_args(
+        ["--base-url", "https://flag.example/v1", "--api-key", "flag-key"]
+    )
+
+    assert args.base_url == "https://flag.example/v1"
+    assert args.api_key == "flag-key"
+
+
+def test_pass_reasoning_content_env_flag_is_tri_state(monkeypatch):
+    from tau.cli import _flag
+
+    monkeypatch.delenv("TAU_PASS_REASONING_CONTENT", raising=False)
+    assert _flag("TAU_PASS_REASONING_CONTENT") is None
+
+    monkeypatch.setenv("TAU_PASS_REASONING_CONTENT", "yes")
+    assert _flag("TAU_PASS_REASONING_CONTENT") is True
+
+    monkeypatch.setenv("TAU_PASS_REASONING_CONTENT", "off")
+    assert _flag("TAU_PASS_REASONING_CONTENT") is False

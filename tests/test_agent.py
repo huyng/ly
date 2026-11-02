@@ -494,13 +494,17 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
     assert [type(e) for e in events].count(MessageStartEvent) == 2
 
 
-def test_create_agent_session_binds_tools_to_the_requested_cwd(tmp_path, monkeypatch):
+def test_create_agent_session_binds_tools_to_the_requested_cwd(tmp_path):
     """Regression: `cwd` reached the system prompt and the policy guard but
     not the tools, so relative writes landed in the process cwd."""
     from tau import create_agent_session
 
-    monkeypatch.setenv("TAU_API_KEY", "test-key")
-    session = create_agent_session(cwd=str(tmp_path), persistent=False)
+    session = create_agent_session(
+        cwd=str(tmp_path),
+        persistent=False,
+        base_url="https://explicit.example/v1",
+        api_key="test-key",
+    )
 
     assert {getattr(tool, "cwd", None) for tool in session.tools.values()} == {
         str(tmp_path)
@@ -669,7 +673,9 @@ def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
             }
 
     provider_type = ChatCompletionsBackend if api == "chat" else ResponsesBackend
-    provider = provider_type(api_key="test", reader=transport)
+    provider = provider_type(
+        base_url="https://explicit.example/v1", api_key="test", reader=transport
+    )
     session = AgentSession(
         provider=provider,
         tools=[],

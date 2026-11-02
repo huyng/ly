@@ -26,10 +26,11 @@ from ..messages import (
     UserMessage,
 )
 from ..tools import Tool
-from .base import Provider, ProviderError
+from .endpoint import Endpoint
+from .errors import ProviderError
 
 
-class ResponsesBackend(Provider):
+class ResponsesBackend(Endpoint):
     """Streaming provider for OpenAI's /v1/responses endpoint."""
 
     api = "openai-responses"
@@ -113,13 +114,8 @@ class ResponsesBackend(Provider):
         abort_event: threading.Event | None = None,
     ) -> Generator[ProviderEvent, None, AssistantMessage]:
         """Stream one turn; yields events, returns the AssistantMessage."""
-        url = self.base_url.rstrip("/") + "/responses"
-        chunks = self.reader(
-            url,
-            self._headers(),
-            self._request_body(system_prompt, messages, tools),
-            timeout=self.timeout,
-        )
+        body = self._request_body(system_prompt, messages, tools)
+        chunks = self._post("/responses", body)
 
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -203,7 +199,7 @@ class ResponsesBackend(Provider):
         except KeyboardInterrupt:
             aborted = True
         finally:
-            _close_stream(chunks)
+            chunks.close()  # drop the connection instead of draining it
 
         if not aborted and stop_reason == "error":
             raise ProviderError(
@@ -271,13 +267,6 @@ def _text(value: Any) -> str:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
-
-
-def _close_stream(stream: Any) -> None:
-    """Close a transport generator if it is closable, ignoring the rest."""
-    close = getattr(stream, "close", None)
-    if callable(close):
-        close()
 
 
 def _as_int(value: Any) -> int:

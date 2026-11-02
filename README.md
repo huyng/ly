@@ -155,13 +155,19 @@ history is left untouched, and the run continues.
 
 ## SDK usage
 
+The SDK takes its configuration as arguments; only the `tau` command reads the
+`TAU_*` environment variables.
+
 ```python
 from tau import create_agent_session
 
 def handler(event):
     print(event.get("delta", ""), end="")
 
-session = create_agent_session()
+session = create_agent_session(
+    base_url="https://api.openai.com/v1",
+    api_key="sk-",
+)
 unsubscribe = session.subscribe(handler)
 session.prompt("What files are in the current directory?")
 unsubscribe()
@@ -195,13 +201,18 @@ The `policy.py` implements some basic gaurds for overtly destructive tool calls 
 ```
 src/tau/
 ├── agent.py       # AgentSession: the agent loop
-├── cli.py         # interactive REPL + print mode
+├── cli.py         # interactive REPL + print mode; reads TAU_* into the flags
 ├── compaction.py  # summarize old turns when the branch gets long
 ├── events.py      # session lifecycle events
 ├── messages.py    # message types (user, assistant, toolResult)
 ├── policy.py      # guard for tool calls (path escapes, obvious accidents)
 ├── prompts.py     # system prompt + AGENTS.md discovery
-├── provider.py    # streaming OpenAI-compatible runtime, urllib + SSE
+├── providers/     # model backends
+│   ├── sse.py     # one POST, urllib + SSE, decoded into JSON chunks
+│   ├── endpoint.py # shared interface and endpoint configuration
+│   ├── errors.py  # ProviderError, and when a failure is worth retrying
+│   ├── chat.py    # /chat/completions backend
+│   └── responses.py # /v1/responses backend
 ├── render.py      # Markdown + unified-diff rendering
 ├── session.py     # JSONL session persistence (tree-shaped)
 ├── spinner.py     # waiting-for-first-chunk spinner

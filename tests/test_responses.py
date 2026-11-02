@@ -13,7 +13,12 @@ from tau.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from tau.providers import ProviderError, ResponsesBackend, make_provider
+from tau.providers import (
+    ChatCompletionsBackend,
+    ProviderError,
+    ResponsesBackend,
+    make_provider,
+)
 from tau.tools import Tool
 
 
@@ -404,14 +409,20 @@ def test_reasoning_summary_uses_default_effort(monkeypatch):
         (" RESPONSES ", "responses"),
     ],
 )
-def test_make_provider_picks_the_backend(monkeypatch, api, expected):
-    monkeypatch.delenv("TAU_API", raising=False)
-    provider = make_provider(api=api, model="m", api_key="test-key")
+def test_make_provider_picks_the_backend(api, expected):
+    provider = make_provider(
+        api=api,
+        model="m",
+        base_url="https://explicit.example/v1",
+        api_key="test-key",
+    )
 
     assert isinstance(provider, ResponsesBackend) is (expected == "responses")
 
 
-def test_make_provider_honours_tau_api(monkeypatch):
-    monkeypatch.setenv("TAU_API", "responses")
+def test_make_provider_defaults_to_chat():
+    provider = make_provider(
+        model="m", base_url="https://explicit.example/v1", api_key="test-key"
+    )
 
-    assert isinstance(make_provider(model="m", api_key="test-key"), ResponsesBackend)
+    assert isinstance(provider, ChatCompletionsBackend)

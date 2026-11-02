@@ -39,7 +39,7 @@ from .messages import (
     UserMessage,
 )
 from .policy import basic_guard
-from .providers import ModelBackendProtocol, ProviderError
+from .providers import ModelBackend, ProviderError
 from .session import SessionManager
 from .tools import Tool, ToolResult, validate_arguments
 
@@ -56,7 +56,7 @@ class AgentSession:
 
     def __init__(
         self,
-        provider: ModelBackendProtocol,
+        provider: ModelBackend,
         tools: list[Tool],
         session_manager: SessionManager,
         system_prompt: str,

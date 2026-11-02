@@ -60,9 +60,21 @@ HELP = """\
 """
 
 
+def _flag(name: str) -> bool | None:
+    """Read a tri-state environment flag; None when the variable is unset."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return None
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
 def make_session(args: argparse.Namespace) -> AgentSession:
     provider = make_provider(
-        api=args.api, model=args.model, base_url=args.base_url, api_key=args.api_key
+        api=args.api,
+        model=args.model,
+        base_url=args.base_url,
+        api_key=args.api_key,
+        pass_reasoning_content=_flag("TAU_PASS_REASONING_CONTENT"),
     )
     manager = SessionManager()
     if args.resume:
@@ -448,7 +460,8 @@ def print_mode(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def main(argv: list[str] | None = None) -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """The command line, with `TAU_*` variables filled in as argument defaults."""
     parser = argparse.ArgumentParser(
         prog="tau", description="A minimal coding agent, modeled after pi"
     )
@@ -460,13 +473,25 @@ def main(argv: list[str] | None = None) -> None:
         help="print mode: run once, write final response",
     )
     parser.add_argument(
-        "-m", "--model", help="model to use (default: $TAU_MODEL or gpt-4.1)"
+        "-m",
+        "--model",
+        default=os.environ.get("TAU_MODEL") or "gpt-4.1",
+        help="model to use (default: $TAU_MODEL or gpt-4.1)",
     )
-    parser.add_argument("--base-url", help="OpenAI-compatible API base URL")
-    parser.add_argument("--api-key", help="API key")
+    parser.add_argument(
+        "--base-url",
+        default=os.environ.get("TAU_BASE_URL") or "",
+        help="OpenAI-compatible API base URL (default: $TAU_BASE_URL)",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=os.environ.get("TAU_API_KEY"),
+        help="API key (default: $TAU_API_KEY)",
+    )
     parser.add_argument(
         "--api",
         choices=("chat", "responses"),
+        default=os.environ.get("TAU_API") or "chat",
         help="OpenAI endpoint flavour (default: $TAU_API or chat); the newest "
         "models need `responses` to use tools",
     )
@@ -474,7 +499,11 @@ def main(argv: list[str] | None = None) -> None:
         "--resume", type=int, metavar="N", help="resume the n-th recent session"
     )
     parser.add_argument("--version", action="version", version=f"tau {__version__}")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
 
     try:
         if args.print:

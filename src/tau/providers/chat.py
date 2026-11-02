@@ -20,10 +20,8 @@ from ..messages import (
     UserMessage,
 )
 from ..tools import Tool
-from .base import (
-    Provider,
-    ProviderError,
-)
+from .endpoint import Endpoint
+from .errors import ProviderError
 
 # OpenAI's documented reasons, plus the DeepSeek-specific failures tau has seen.
 _STOP_REASONS = {
@@ -35,7 +33,7 @@ _STOP_REASONS = {
 }
 
 
-class ChatCompletionsBackend(Provider):
+class ChatCompletionsBackend(Endpoint):
     """Streaming provider for any OpenAI-compatible chat-completions endpoint."""
 
     api = "openai-completions"
@@ -141,13 +139,8 @@ class ChatCompletionsBackend(Provider):
         abort_event: threading.Event | None = None,
     ) -> Generator[ProviderEvent, None, AssistantMessage]:
         """Stream one turn; yields events, returns the AssistantMessage."""
-        url = self.base_url.rstrip("/") + "/chat/completions"
-        chunks = self.reader(
-            url,
-            self._headers(),
-            self._request_body(system_prompt, messages, tools),
-            timeout=self.timeout,
-        )
+        body = self._request_body(system_prompt, messages, tools)
+        chunks = self._post("/chat/completions", body)
 
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -216,8 +209,7 @@ class ChatCompletionsBackend(Provider):
             # Ctrl-C surfaced inside the stream: finalize as aborted.
             aborted = True
         finally:
-            # Deterministic: drop the connection instead of draining it.
-            _close_stream(chunks)
+            chunks.close()  # drop the connection instead of draining it
 
         if not aborted and stop_reason == "error":
             raise ProviderError(
@@ -275,10 +267,3 @@ def _as_int(value: Any) -> int:
 
 def new_call_id() -> str:
     return f"call_{uuid.uuid4().hex[:24]}"
-
-
-def _close_stream(stream: Any) -> None:
-    """Close a transport generator if it is closable, ignoring the rest."""
-    close = getattr(stream, "close", None)
-    if callable(close):
-        close()

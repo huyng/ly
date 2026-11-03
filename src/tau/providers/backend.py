@@ -426,17 +426,17 @@ class ResponsesBackend(ModelBackend):
                     break
                 kind = chunk.get("type")
                 if kind == "response.output_text.delta":
-                    delta = _text(chunk.get("delta"))
+                    delta = _as_text(chunk.get("delta"))
                     if delta:
                         text_parts.append(delta)
                         yield TextDeltaEvent(delta=delta)
                 elif kind == "response.reasoning_summary_text.delta":
-                    delta = _text(chunk.get("delta"))
+                    delta = _as_text(chunk.get("delta"))
                     if delta:
                         reasoning_parts.append(delta)
                         yield ReasoningDeltaEvent(delta=delta)
                 elif kind == "response.output_item.added":
-                    item = _mapping(chunk.get("item"))
+                    item = _as_mapping(chunk.get("item"))
                     if item.get("type") == "function_call":
                         call = _call_entry(item)
                         calls[_item_key(chunk, item)] = call
@@ -445,46 +445,46 @@ class ResponsesBackend(ModelBackend):
                 elif kind == "response.function_call_arguments.delta":
                     call = calls.get(_item_key(chunk))
                     if call is not None:
-                        call["arguments"] += _text(chunk.get("delta"))
+                        call["arguments"] += _as_text(chunk.get("delta"))
                 elif kind == "response.output_item.done":
                     # The done event is authoritative: deltas may be incomplete.
-                    item = _mapping(chunk.get("item"))
+                    item = _as_mapping(chunk.get("item"))
                     if item.get("type") == "function_call":
                         call = calls.setdefault(
                             _item_key(chunk, item), _call_entry(item)
                         )
-                        call["id"] = call["id"] or _text(item.get("call_id"))
-                        call["name"] = call["name"] or _text(item.get("name"))
+                        call["id"] = call["id"] or _as_text(item.get("call_id"))
+                        call["name"] = call["name"] or _as_text(item.get("name"))
                         call["arguments"] = (
-                            _text(item.get("arguments")) or call["arguments"]
+                            _as_text(item.get("arguments")) or call["arguments"]
                         )
                 elif kind == "response.completed":
                     usage = (
                         _responses_usage_from(
-                            _mapping(chunk.get("response")).get("usage")
+                            _as_mapping(chunk.get("response")).get("usage")
                         )
                         or usage
                     )
                 elif kind == "response.incomplete":
                     stop_reason = "length"
-                    response = _mapping(chunk.get("response"))
-                    details = _mapping(response.get("incomplete_details"))
+                    response = _as_mapping(chunk.get("response"))
+                    details = _as_mapping(response.get("incomplete_details"))
                     if details.get("reason") == "content_filter":
                         stop_reason = "error"
                         failure_reason = "content_filter"
                 elif kind in ("response.failed", "error"):
                     stop_reason = "error"
-                    response = _mapping(chunk.get("response"))
+                    response = _as_mapping(chunk.get("response"))
                     usage = _responses_usage_from(response.get("usage")) or usage
-                    error = _mapping(response.get("error")) or chunk
+                    error = _as_mapping(response.get("error")) or chunk
                     retryable = error.get("code") in (
                         "server_error",
                         "rate_limit_exceeded",
                         "insufficient_system_resource",
                     )
                     failure_reason = (
-                        _text(error.get("message"))
-                        or _text(chunk.get("message"))
+                        _as_text(error.get("message"))
+                        or _as_text(chunk.get("message"))
                         or "response failed"
                     )
         except ProviderError as exc:
@@ -532,15 +532,15 @@ def _item_key(chunk: Mapping[str, Any], item: Mapping[str, Any] | None = None) -
     """Name for one function call as it appears across several events."""
     if item is not None and item.get("id"):
         return str(item["id"])
-    if item_id := _text(chunk.get("item_id")):
+    if item_id := _as_text(chunk.get("item_id")):
         return item_id
     return f"#{chunk.get('output_index', 0)}"
 
 
 def _call_entry(item: Mapping[str, Any]) -> dict[str, str]:
     return {
-        "id": _text(item.get("call_id")),
-        "name": _text(item.get("name")),
+        "id": _as_text(item.get("call_id")),
+        "name": _as_text(item.get("name")),
         "arguments": "",
     }
 
@@ -556,16 +556,15 @@ def _responses_usage_from(payload: Any) -> Usage | None:
     )
 
 
-def _text(value: Any) -> str:
+def _as_text(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _mapping(value: Any) -> Mapping[str, Any]:
+def _as_mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
 def _as_int(value: Any) -> int:
-    """Shared by both usage parsers."""
     return value if isinstance(value, int) else 0
 
 

@@ -9,15 +9,14 @@ import http.client
 import json
 import urllib.error
 import urllib.request
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from contextlib import closing
-from typing import Any, Protocol
+from typing import Any, Generator, Protocol
 
 from .errors import ProviderError
 
 #: A parsed `data:` payload from the event stream.
 Chunk = Mapping[str, Any]
-ChunkStream = Iterator[Chunk]
 
 #: Status codes worth retrying: rate limits and server-side failures.
 RETRYABLE_STATUSES = frozenset({408, 409, 425, 429})
@@ -25,7 +24,11 @@ DEFAULT_TIMEOUT = 600.0
 
 
 class StreamReader:
-    """Reads the response to one POST as a stream of decoded chunks."""
+    """Reads the response to one POST as a stream of decoded chunks.
+
+    `read_chunks` is a generator, so closing it drops the connection instead of
+    draining the rest of the response.
+    """
 
     def __init__(
         self,
@@ -39,7 +42,7 @@ class StreamReader:
         self.body = body
         self.timeout = timeout if timeout else DEFAULT_TIMEOUT
 
-    def read_chunks(self) -> ChunkStream:
+    def read_chunks(self) -> Generator[Chunk, None, None]:
         """POST `body` and yield each SSE event's JSON payload.
 
         Lines that are not `data:` (blank separators, `:` heartbeat comments,

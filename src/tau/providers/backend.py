@@ -61,21 +61,6 @@ class ModelBackend:
             "Accept-Encoding": "identity",
         }
 
-    def _post(self, path: str, body: bytes) -> Generator[Chunk, None, None]:
-        """POST `body` under the provider's base URL and stream the chunks.
-
-        Closing the returned stream closes the connection underneath it, so
-        abandoning a turn drops the response instead of draining it.
-        """
-        url = self.provider.base_url.rstrip("/") + path
-        chunks = self.reader(url, headers=self._make_headers(), body=body).read_chunks()
-        try:
-            yield from chunks
-        finally:
-            close = getattr(chunks, "close", None)
-            if callable(close):
-                close()
-
     def stream(
         self,
         system_prompt: str,
@@ -203,7 +188,12 @@ class ChatCompletionsBackend(ModelBackend):
     ) -> Generator[ProviderEvent, None, AssistantMessage]:
         """Stream one turn; yields events, returns the AssistantMessage."""
         body = self._make_request_body(system_prompt, messages, tools)
-        chunks = self._post("/chat/completions", body)
+        headers = self._make_headers()
+        chunks = self.reader(
+            url=self.provider.base_url.rstrip("/") + "/chat/completions",
+            headers=headers,
+            body=body,
+        ).read_chunks()
 
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -413,7 +403,12 @@ class ResponsesBackend(ModelBackend):
     ) -> Generator[ProviderEvent, None, AssistantMessage]:
         """Stream one turn; yields events, returns the AssistantMessage."""
         body = self._make_request_body(system_prompt, messages, tools)
-        chunks = self._post("/responses", body)
+        headers = self._make_headers()
+        chunks = self.reader(
+            url=self.provider.base_url.rstrip("/") + "/responses",
+            headers=headers,
+            body=body,
+        ).read_chunks()
 
         text_parts: list[str] = []
         reasoning_parts: list[str] = []

@@ -7,12 +7,13 @@ Modes:
 
 import argparse
 import os
-import readline  # noqa: F401 — side effect: line editing for input(), see _read
-import select
+import re
+import readline
 import sys
 import time
 from collections.abc import Callable
 from datetime import datetime
+from uuid import uuid4
 
 from . import __version__
 from .agent import AgentSession
@@ -311,31 +312,80 @@ class Repl:
             self._submit(line)
 
     def _read(self, prompt: str) -> str | None:
-        """Read one prompt, sending a pasted block as a single message.
-
-        `input()` returns a single line, so a multi-line paste would turn into
-        one prompt per line. What is left of the paste is already queued in the
-        tty, so drain it while data is ready and join on newlines. Only a real
-        terminal behaves that way: with piped stdin the leftover lines sit in
-        Python's buffer, where the peek would miss them.
-
-        The line is editable (Ctrl-A/Ctrl-E, arrow-key history) because
-        `readline` is imported at module level; `input()` only gets that
-        behaviour when the module has been imported.
-        """
+        """Read a prompt, keeping bracketed pastes together until Enter."""
         try:
-            first = input(prompt)
+            if not sys.stdin.isatty():
+                return input(prompt)
+            if "libedit" in (readline.__doc__ or ""):
+                # Use libedit
+                # Libedit misrenders color even with nonprinting markers.
+                prompt = re.sub(r"\x1b\[[0-9;]*m", "", prompt)
+                return self._read_libedit(prompt)
+
+            else:
+                # Use GNU Readline
+                # GNU Readline must not count color sequences as visible columns.
+                prompt = re.sub(r"\x1b\[[0-9;]*m", "\001\\g<0>\002", prompt)
+                readline.parse_and_bind("set enable-bracketed-paste on")
+                return input(prompt)
         except EOFError:
             return None
-        if not sys.stdin.isatty():
-            return first
-        lines = [first]
-        while select.select([sys.stdin], [], [], 0)[0]:
+
+    def _read_libedit(self, prompt: str) -> str:
+        """Capture literal pastes through libedit's completion hook.
+
+        Libedit has no native bracketed-paste handler. Show a placeholder rather
+        than inserting newlines into its single-line editor, where they submit
+        the prompt. Expand placeholders only after the user presses Enter.
+        """
+        pastes: dict[str, str] = {}
+        failures: list[BaseException] = []
+
+        def paste(text: str, state: int) -> str | None:
+            if state:
+                return None
             try:
-                lines.append(input())
-            except EOFError:
-                break
-        return "\n".join(lines)
+                data = bytearray()
+                while not data.endswith(b"\x1b[201~"):
+                    chunk = os.read(sys.stdin.fileno(), 1)
+                    if not chunk:
+                        raise EOFError
+                    data.extend(chunk)
+                content = data[:-6].decode(sys.stdin.encoding, errors="replace")
+                content = content.replace("\r\n", "\n").replace("\r", "\n")
+                marker = f"[paste {uuid4().hex[:8]}: {len(content)} chars]"
+                pastes[marker] = content
+                # Let completion insert and paint the placeholder immediately.
+                return text + marker
+            except BaseException as exc:
+                # Readline swallows callback exceptions; propagate after input.
+                failures.append(exc)
+            return None
+
+        previous = readline.get_completer()
+        readline.set_completer(paste)
+        readline.parse_and_bind(r'bind "^[[200~" rl_complete')
+        # Tab must not invoke the paste callback and wait for an end marker.
+        readline.parse_and_bind(r'bind "^I" ed-insert')
+        try:
+            sys.stdout.write("\x1b[?2004h")
+            sys.stdout.flush()
+            line = input(prompt)
+            if failures:
+                raise failures[0]
+            expanded = line
+            for marker, content in pastes.items():
+                expanded = expanded.replace(marker, content)
+            history_length = readline.get_current_history_length()
+            if pastes and readline.get_history_item(history_length) == line:
+                readline.replace_history_item(history_length - 1, expanded)
+            return expanded
+        finally:
+            sys.stdout.write("\x1b[?2004l")
+            sys.stdout.flush()
+            readline.set_completer(previous)
+            readline.parse_and_bind(r'bind -r "^[[200~"')
+            readline.parse_and_bind(r'bind "^I" rl_complete')
 
     def _submit(self, text: str) -> None:
         started = time.monotonic()

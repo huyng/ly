@@ -91,6 +91,7 @@ class StreamReader:
                         ) from err
                     if isinstance(chunk, dict):
                         yield chunk
+
         except (http.client.HTTPException, OSError) as err:
             # A connection dropped or timed out mid-stream: the turn is incomplete,
             # and a fresh request is the remedy. ProviderErrors raised above pass

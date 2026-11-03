@@ -88,6 +88,11 @@ tau --resume 2                     # resume a previous session
 
 Ctrl-C aborts the active run (steering between turns). Ctrl-D exits.
 
+In terminals supporting bracketed paste, multiline pastes stay in one prompt;
+press Enter to submit. On macOS's libedit backend, pasted text appears as a
+`[paste …: N chars]` placeholder until submission. Delete the placeholder to
+remove that paste.
+
 ## How it works
 
 A session is tau's record of a conversation. The pieces mirror pi:

@@ -220,6 +220,7 @@ class ChatCompletionsBackend(ModelBackend):
                 delta = choice.get("delta")
                 if not isinstance(delta, Mapping):
                     continue
+
                 # The stream is untrusted JSON, so narrow before use: a
                 # malformed event is skipped rather than crashing the turn.
                 piece = delta.get("content")
@@ -439,16 +440,19 @@ class ResponsesBackend(ModelBackend):
                     aborted = True
                     break
                 kind = chunk.get("type")
+
                 if kind == "response.output_text.delta":
                     delta = _as_text(chunk.get("delta"))
                     if delta:
                         text_parts.append(delta)
                         yield TextDeltaEvent(delta=delta)
+
                 elif kind == "response.reasoning_summary_text.delta":
                     delta = _as_text(chunk.get("delta"))
                     if delta:
                         reasoning_parts.append(delta)
                         yield ReasoningDeltaEvent(delta=delta)
+
                 elif kind == "response.output_item.added":
                     item = _as_mapping(chunk.get("item"))
                     if item.get("type") == "function_call":
@@ -458,10 +462,12 @@ class ResponsesBackend(ModelBackend):
                             yield ToolNameEvent(name=call["name"])
                     elif item.get("type") == "reasoning":
                         reasoning_item = _reasoning_item(item, reasoning_item)
+
                 elif kind == "response.function_call_arguments.delta":
                     call = calls.get(_item_key(chunk))
                     if call is not None:
                         call["arguments"] += _as_text(chunk.get("delta"))
+
                 elif kind == "response.output_item.done":
                     # The done event is authoritative: deltas may be incomplete.
                     item = _as_mapping(chunk.get("item"))

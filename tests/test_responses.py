@@ -12,6 +12,8 @@ from tau.messages import (
     ToolCall,
     ToolResultMessage,
     UserMessage,
+    deserialize_message,
+    serialize_message,
 )
 from tau.providers import Provider, ProviderError, make_backend
 from tau.providers.backend import ChatCompletionsBackend, ResponsesBackend
@@ -122,6 +124,29 @@ def test_reasoning_summary_deltas_are_streamed_and_stored():
     )
     assert message.reasoning_content == "Thinking hard."
     assert message.text == "Done."
+
+
+def test_encrypted_reasoning_is_captured_and_survives_serialization():
+    chunks = [
+        event("response.output_item.added", item={"type": "reasoning", "id": "rs_1"}),
+        event(
+            "response.output_item.done",
+            item={"type": "reasoning", "id": "rs_1", "encrypted_content": "gAAA"},
+        ),
+        event("response.output_text.delta", delta="Done."),
+    ]
+    backend = make_backend_for(chunks)
+
+    _, message = collect(backend, [UserMessage(content="hi")])
+
+    assert last_request().body["include"] == ["reasoning.encrypted_content"]
+    assert message.encrypted_reasoning == "gAAA"
+
+    data = serialize_message(message)
+    assert data["encryptedReasoning"] == "gAAA"
+    restored = deserialize_message(data)
+    assert isinstance(restored, AssistantMessage)
+    assert restored.encrypted_reasoning == "gAAA"
 
 
 def test_function_call_deltas_become_a_tool_call():
@@ -373,6 +398,43 @@ def test_request_uses_instructions_and_input_items():
             "arguments": json.dumps({"path": "a.py"}),
         },
         {"type": "function_call_output", "call_id": "call_1", "output": "print(1)"},
+    ]
+
+
+def test_encrypted_reasoning_is_replayed_only_for_the_in_flight_turn():
+    backend = make_backend_for([])
+    history = [
+        UserMessage(content="go"),
+        AssistantMessage(
+            content=[TextContent(text="one")], model="m", encrypted_reasoning="old"
+        ),
+        AssistantMessage(
+            content=[
+                TextContent(text="two"),
+                ToolCall(id="call_1", name="read", arguments={}),
+            ],
+            model="m",
+            encrypted_reasoning="new",
+        ),
+        ToolResultMessage(tool_call_id="call_1", tool_name="read", output="ok"),
+    ]
+
+    collect(backend, history)
+
+    assert last_request().body["input"] == [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": [{"type": "output_text", "text": "one"}]},
+        # The reasoning item must lead the turn it belongs to, and carries no id:
+        # nothing was stored server-side, so a replayed id would not resolve.
+        {"type": "reasoning", "encrypted_content": "new"},
+        {"role": "assistant", "content": [{"type": "output_text", "text": "two"}]},
+        {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "read",
+            "arguments": "{}",
+        },
+        {"type": "function_call_output", "call_id": "call_1", "output": "ok"},
     ]
 
 

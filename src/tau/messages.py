@@ -79,6 +79,9 @@ class AssistantMessage:
     # Thinking-mode chain of thought. DeepSeek requires this to be sent back
     # on every subsequent request when tools are present.
     reasoning_content: str | None = None
+    # Responses-API only: opaque blob from `reasoning.encrypted_content`. Sent
+    # back so a stateless request (store=false) keeps its chain of thought.
+    encrypted_reasoning: str | None = None
     role: str = field(default="assistant", init=False)
     timestamp: int = field(default_factory=now_ms, init=False)
 
@@ -126,6 +129,8 @@ def serialize_message(message: AgentMessage) -> dict[str, Any]:
             data["errorMessage"] = message.error_message
         if message.reasoning_content:
             data["reasoningContent"] = message.reasoning_content
+        if message.encrypted_reasoning:
+            data["encryptedReasoning"] = message.encrypted_reasoning
         blocks: list[dict[str, Any]] = []
         for block in message.content:
             if isinstance(block, TextContent):
@@ -183,6 +188,7 @@ def deserialize_message(data: dict[str, Any]) -> AgentMessage:
             ),
             error_message=data.get("errorMessage"),
             reasoning_content=data.get("reasoningContent"),
+            encrypted_reasoning=data.get("encryptedReasoning"),
         )
     elif role == "toolResult":
         message = ToolResultMessage(

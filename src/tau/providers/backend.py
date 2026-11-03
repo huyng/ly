@@ -335,10 +335,27 @@ class ResponsesBackend(ModelBackend):
         packs both into one assistant message.
         """
         items: list[dict[str, Any]] = []
-        for message in messages:
+        # Only the trailing assistant turn is still in flight; echoing finished
+        # turns' reasoning is dead weight, as on chat-completions.
+        in_flight = -1
+        for index in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[index], AssistantMessage):
+                in_flight = index
+                break
+        for index, message in enumerate(messages):
             if isinstance(message, UserMessage):
                 items.append({"role": "user", "content": message.content})
             elif isinstance(message, AssistantMessage):
+                if index == in_flight and message.encrypted_reasoning:
+                    # Must precede the turn's own output items. The id is left
+                    # off: the server never stored it, so replaying it would
+                    # fail with "Item with id ... was not found".
+                    items.append(
+                        {
+                            "type": "reasoning",
+                            "encrypted_content": message.encrypted_reasoning,
+                        }
+                    )
                 if message.text:
                     items.append(
                         {
@@ -380,6 +397,9 @@ class ResponsesBackend(ModelBackend):
             "store": False,
             # Request summaries so reasoning text appears on the stream.
             "reasoning": {"summary": "auto"},
+            # `store` is False, so reasoning items come back as an opaque blob
+            # we can replay instead of asking the server to remember them.
+            "include": ["reasoning.encrypted_content"],
         }
         if tools:
             # Flat on Responses: no `function` wrapper around the schema.
@@ -412,6 +432,7 @@ class ResponsesBackend(ModelBackend):
 
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
+        encrypted_reasoning: str | None = None
         calls: OrderedDict[str, dict[str, str]] = OrderedDict()
         usage = Usage()
         stop_reason = "stop"
@@ -442,6 +463,11 @@ class ResponsesBackend(ModelBackend):
                         calls[_item_key(chunk, item)] = call
                         if call["name"]:
                             yield ToolNameEvent(name=call["name"])
+                    elif item.get("type") == "reasoning":
+                        encrypted_reasoning = (
+                            _as_text(item.get("encrypted_content"))
+                            or encrypted_reasoning
+                        )
                 elif kind == "response.function_call_arguments.delta":
                     call = calls.get(_item_key(chunk))
                     if call is not None:
@@ -457,6 +483,11 @@ class ResponsesBackend(ModelBackend):
                         call["name"] = call["name"] or _as_text(item.get("name"))
                         call["arguments"] = (
                             _as_text(item.get("arguments")) or call["arguments"]
+                        )
+                    elif item.get("type") == "reasoning":
+                        encrypted_reasoning = (
+                            _as_text(item.get("encrypted_content"))
+                            or encrypted_reasoning
                         )
                 elif kind == "response.completed":
                     usage = (
@@ -525,6 +556,7 @@ class ResponsesBackend(ModelBackend):
             usage=usage,
             error_message=failure_reason,
             reasoning_content="".join(reasoning_parts) or None,
+            encrypted_reasoning=encrypted_reasoning,
         )
 
 

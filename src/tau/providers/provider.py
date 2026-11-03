@@ -7,7 +7,6 @@ being shadowed by a copy taken inside the backend.
 """
 
 from .errors import MissingBaseURLError, MissingCredentialsError
-from .sse import DEFAULT_TIMEOUT
 
 #: Used when the caller does not name a model.
 DEFAULT_MODEL = "gpt-4.1"
@@ -21,7 +20,6 @@ class Provider:
         model: str = DEFAULT_MODEL,
         base_url: str = "",
         api_key: str = "",
-        timeout: float = DEFAULT_TIMEOUT,
         pass_reasoning_content: bool | None = None,
     ):
         if not api_key:
@@ -40,5 +38,4 @@ class Provider:
         self.model = model
         self.base_url = base_url
         self.api_key = api_key
-        self.timeout = timeout
         self.pass_reasoning_content = pass_reasoning_content

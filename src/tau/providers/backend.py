@@ -68,9 +68,7 @@ class ModelBackend:
         abandoning a turn drops the response instead of draining it.
         """
         url = self.provider.base_url.rstrip("/") + path
-        chunks = self.reader(
-            url, self._make_headers(), body, timeout=self.provider.timeout
-        ).read_chunks()
+        chunks = self.reader(url, headers=self._make_headers(), body=body).read_chunks()
         try:
             yield from chunks
         finally:

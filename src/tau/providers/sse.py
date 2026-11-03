@@ -32,12 +32,12 @@ class StreamReader:
         url: str,
         headers: dict[str, str],
         body: bytes,
-        timeout: float = DEFAULT_TIMEOUT,
+        timeout: float | None = None,
     ):
         self.url = url
         self.headers = headers
         self.body = body
-        self.timeout = timeout
+        self.timeout = timeout if timeout else DEFAULT_TIMEOUT
 
     def read_chunks(self) -> ChunkStream:
         """POST `body` and yield each SSE event's JSON payload.

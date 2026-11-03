@@ -316,7 +316,7 @@ class AgentSession:
                 while True:
                     try:
                         if stream is None:
-                            stream = self.backend.stream(
+                            stream = self.backend.stream_response(
                                 self.system_prompt,
                                 messages,
                                 tools,

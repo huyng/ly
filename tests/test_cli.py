@@ -24,7 +24,7 @@ class ScriptedBackend(ModelBackend):
     def __init__(self):
         super().__init__(Provider(model="fake-model", base_url="fake", api_key="fake"))
 
-    def stream(self, *_args, **_kwargs):
+    def stream_response(self, *_args, **_kwargs):
         raise AssertionError("the status line must not call the provider")
 
 

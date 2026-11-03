@@ -45,7 +45,7 @@ class ScriptedBackend(ModelBackend):
         self.turns = list(turns)
         self.requests: list[dict[str, Any]] = []
 
-    def stream(self, system_prompt, messages, tools, abort_event=None):
+    def stream_response(self, system_prompt, messages, tools, abort_event=None):
         self.requests.append(
             {
                 "system": system_prompt,
@@ -381,8 +381,8 @@ def test_cancelled_compaction_stops_the_run(stop_reason):
     current_id = session.session_manager.current_id
 
     class CancellingBackend(ScriptedBackend):
-        def stream(self, system_prompt, messages, tools, abort_event=None):
-            result = yield from super().stream(
+        def stream_response(self, system_prompt, messages, tools, abort_event=None):
+            result = yield from super().stream_response(
                 system_prompt, messages, tools, abort_event
             )
             if stop_reason == "stop":
@@ -444,7 +444,7 @@ def test_summary_usage_counts_toward_session_usage():
 
 def test_failed_summary_usage_counts_toward_session_usage():
     class FailingBackend(ScriptedBackend):
-        def stream(self, *_args, **_kwargs):
+        def stream_response(self, *_args, **_kwargs):
             raise ProviderError(
                 "summary failed",
                 retryable=False,

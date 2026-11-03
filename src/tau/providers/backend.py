@@ -1,6 +1,6 @@
 """Every wire format tau can speak, from the transport up.
 
-All backends share one contract: `stream` takes the transcript, yields events,
+All backends share one contract: `stream_response` takes the transcript, yields events,
 and returns the AssistantMessage. What to talk to — model, endpoint, key,
 timeout — arrives as a `Provider` given to the constructor, and each request
 reads it fresh, so `provider.model = ...` takes effect on the next request
@@ -40,7 +40,7 @@ from .sse import Chunk, StreamReader
 
 
 class ModelBackend:
-    """Wire format for one API flavour; subclasses speak it in `stream`.
+    """Wire format for one API flavour; subclasses speak it in `stream_response`.
 
     Holds the provider it reads configuration from, and the reader that turns a
     POST into chunks. What varies between subclasses is the request body and
@@ -61,7 +61,7 @@ class ModelBackend:
             "Accept-Encoding": "identity",
         }
 
-    def stream(
+    def stream_response(
         self,
         system_prompt: str,
         messages: list[AgentMessage],
@@ -179,7 +179,7 @@ class ChatCompletionsBackend(ModelBackend):
             body["tools"] = self._tool_schemas(tools)
         return json.dumps(body).encode("utf-8")
 
-    def stream(
+    def stream_response(
         self,
         system_prompt: str,
         messages: list[AgentMessage],
@@ -346,16 +346,9 @@ class ResponsesBackend(ModelBackend):
             if isinstance(message, UserMessage):
                 items.append({"role": "user", "content": message.content})
             elif isinstance(message, AssistantMessage):
-                if index == in_flight and message.encrypted_reasoning:
-                    # Must precede the turn's own output items. The id is left
-                    # off: the server never stored it, so replaying it would
-                    # fail with "Item with id ... was not found".
-                    items.append(
-                        {
-                            "type": "reasoning",
-                            "encrypted_content": message.encrypted_reasoning,
-                        }
-                    )
+                if index == in_flight and message.reasoning_item:
+                    # Must precede the turn's own output items.
+                    items.append(message.reasoning_item)
                 if message.text:
                     items.append(
                         {
@@ -414,7 +407,7 @@ class ResponsesBackend(ModelBackend):
             ]
         return json.dumps(body).encode("utf-8")
 
-    def stream(
+    def stream_response(
         self,
         system_prompt: str,
         messages: list[AgentMessage],
@@ -432,7 +425,7 @@ class ResponsesBackend(ModelBackend):
 
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
-        encrypted_reasoning: str | None = None
+        reasoning_item: dict[str, Any] | None = None
         calls: OrderedDict[str, dict[str, str]] = OrderedDict()
         usage = Usage()
         stop_reason = "stop"
@@ -464,10 +457,7 @@ class ResponsesBackend(ModelBackend):
                         if call["name"]:
                             yield ToolNameEvent(name=call["name"])
                     elif item.get("type") == "reasoning":
-                        encrypted_reasoning = (
-                            _as_text(item.get("encrypted_content"))
-                            or encrypted_reasoning
-                        )
+                        reasoning_item = _reasoning_item(item, reasoning_item)
                 elif kind == "response.function_call_arguments.delta":
                     call = calls.get(_item_key(chunk))
                     if call is not None:
@@ -485,10 +475,7 @@ class ResponsesBackend(ModelBackend):
                             _as_text(item.get("arguments")) or call["arguments"]
                         )
                     elif item.get("type") == "reasoning":
-                        encrypted_reasoning = (
-                            _as_text(item.get("encrypted_content"))
-                            or encrypted_reasoning
-                        )
+                        reasoning_item = _reasoning_item(item, reasoning_item)
                 elif kind == "response.completed":
                     usage = (
                         _responses_usage_from(
@@ -534,6 +521,11 @@ class ResponsesBackend(ModelBackend):
                 usage=usage,
             )
 
+        # Without the blob there is nothing to replay: the summary alone would
+        # be a half-empty item the API has no use for.
+        if reasoning_item and not reasoning_item["encrypted_content"]:
+            reasoning_item = None
+
         content: list[TextContent | ToolCall] = []
         if text := "".join(text_parts):
             content.append(TextContent(text=text))
@@ -556,8 +548,27 @@ class ResponsesBackend(ModelBackend):
             usage=usage,
             error_message=failure_reason,
             reasoning_content="".join(reasoning_parts) or None,
-            encrypted_reasoning=encrypted_reasoning,
+            reasoning_item=reasoning_item,
         )
+
+
+def _reasoning_item(
+    chunk: Mapping[str, Any], previous: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Refresh the reasoning item tau will replay on the next request.
+
+    The item arrives across two events, so each field is taken from whichever
+    event carries it: the blob may come on `added`, while only `done` is
+    guaranteed to hold the `summary` list that input items require. The id is
+    dropped — nothing was stored server-side, so a replayed id would not
+    resolve.
+    """
+    item = previous or {"type": "reasoning", "summary": [], "encrypted_content": ""}
+    if summary := _as_list(chunk.get("summary")):
+        item["summary"] = summary
+    if blob := _as_text(chunk.get("encrypted_content")):
+        item["encrypted_content"] = blob
+    return item
 
 
 def _item_key(chunk: Mapping[str, Any], item: Mapping[str, Any] | None = None) -> str:

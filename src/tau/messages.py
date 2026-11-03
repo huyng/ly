@@ -1,8 +1,22 @@
-"""Agent message types, modeled after pi's AgentMessage union.
+"""Define conversation messages and their session JSON representation.
 
-Timestamps are Unix milliseconds. Assistant messages contain content blocks
-(text and tool calls); tool results are standalone messages referencing a
-tool call id, as in pi's transcript model.
+Structure:
+    AgentMessage
+    ├── UserMessage: content (text)
+    ├── AssistantMessage: content (list of blocks), model, api, usage, …
+    │   ├── TextContent: text
+    │   └── ToolCall: id, name, arguments
+    └── ToolResultMessage: tool_call_id, tool_name, output, is_error
+
+Every message has a fixed role and a timestamp in Unix milliseconds. Tool
+results are separate messages linked to an assistant's tool call by its id.
+An assistant message can contain both text and tool calls.
+
+Session JSON uses camelCase for Python's snake_case fields (for example,
+stop_reason becomes stopReason). The role identifies the message variant;
+each content block's type identifies text or toolCall. Optional error and
+reasoning fields are omitted when empty. These are tau's internal messages,
+not provider request bodies; each backend converts them to its API format.
 """
 
 import time
@@ -25,6 +39,8 @@ def new_id() -> str:
 
 @dataclass
 class TextContent:
+    """Hold one text block in an assistant message."""
+
     text: str
 
     type: str = field(default="text", init=False)
@@ -32,6 +48,8 @@ class TextContent:
 
 @dataclass
 class ToolCall:
+    """Request a named tool with parsed arguments and an id for its result."""
+
     id: str
     name: str
     arguments: dict[str, Any]
@@ -45,6 +63,8 @@ class ToolCall:
 
 @dataclass
 class Usage:
+    """Count input, output, and total tokens reported by the provider."""
+
     input: int = 0
     output: int = 0
     total_tokens: int = 0
@@ -61,6 +81,8 @@ class Usage:
 
 @dataclass
 class UserMessage:
+    """Hold a user's text with the fixed role 'user'."""
+
     content: str
 
     role: str = field(default="user", init=False)
@@ -69,6 +91,24 @@ class UserMessage:
 
 @dataclass
 class AssistantMessage:
+    """Hold an assistant response, including tool calls and provider metadata.
+
+    Args:
+        content: Ordered text and tool-call blocks; may be empty on failure.
+        model: Model identifier used to generate the response.
+        api: API format, not service identity: 'openai-completions' or
+            'openai-responses'. Empty when unspecified; does not route requests.
+        stop_reason: 'stop' for completion, 'toolUse' for tool calls, 'length'
+            for a limit, 'error' for failure, or 'aborted' for cancellation.
+        usage: Provider-reported token counts; defaults to zero counts.
+        error_message: Failure details, when present.
+        reasoning_content: Readable reasoning or summary text. Chat backends
+            may replay it when required by the service.
+        reasoning_item: Responses-only replay data: type='reasoning', summary
+            (a list), and encrypted_content (an opaque string), without an id.
+            None when no encrypted reasoning is available.
+    """
+
     content: list[TextContent | ToolCall]
     model: str
 
@@ -79,9 +119,10 @@ class AssistantMessage:
     # Thinking-mode chain of thought. DeepSeek requires this to be sent back
     # on every subsequent request when tools are present.
     reasoning_content: str | None = None
-    # Responses-API only: opaque blob from `reasoning.encrypted_content`. Sent
-    # back so a stateless request (store=false) keeps its chain of thought.
-    encrypted_reasoning: str | None = None
+    # Responses-API only: the reasoning item to replay on the next request.
+    # `summary` is a required field on input and `encrypted_content` is the
+    # stateless (store=false) stand-in for server-side storage.
+    reasoning_item: dict[str, Any] | None = None
     role: str = field(default="assistant", init=False)
     timestamp: int = field(default_factory=now_ms, init=False)
 
@@ -96,6 +137,12 @@ class AssistantMessage:
 
 @dataclass
 class ToolResultMessage:
+    """Hold tool output linked to a ToolCall.id by tool_call_id.
+
+    tool_name identifies the executed tool. output is text, including error
+    details when is_error is true. The fixed role is 'toolResult'.
+    """
+
     tool_call_id: str
     tool_name: str
     output: str
@@ -129,8 +176,8 @@ def serialize_message(message: AgentMessage) -> dict[str, Any]:
             data["errorMessage"] = message.error_message
         if message.reasoning_content:
             data["reasoningContent"] = message.reasoning_content
-        if message.encrypted_reasoning:
-            data["encryptedReasoning"] = message.encrypted_reasoning
+        if message.reasoning_item:
+            data["reasoningItem"] = message.reasoning_item
         blocks: list[dict[str, Any]] = []
         for block in message.content:
             if isinstance(block, TextContent):
@@ -188,7 +235,7 @@ def deserialize_message(data: dict[str, Any]) -> AgentMessage:
             ),
             error_message=data.get("errorMessage"),
             reasoning_content=data.get("reasoningContent"),
-            encrypted_reasoning=data.get("encryptedReasoning"),
+            reasoning_item=data.get("reasoningItem"),
         )
     elif role == "toolResult":
         message = ToolResultMessage(

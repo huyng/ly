@@ -42,7 +42,7 @@ class FakeBackend(ModelBackend):
         self.turns = list(turns)
         self.requests: list[tuple[str, list, list]] = []
 
-    def stream(self, system_prompt, messages, tools, abort_event=None):
+    def stream_response(self, system_prompt, messages, tools, abort_event=None):
         self.requests.append((system_prompt, list(messages), list(tools)))
         turn = self.turns.pop(0)
 
@@ -361,7 +361,7 @@ def test_abort_during_retry_stops_without_another_request(tmp_path):
             super().__init__([])
             self.calls = 0
 
-        def stream(self, *_args, **_kwargs):
+        def stream_response(self, *_args, **_kwargs):
             self.calls += 1
             raise ProviderError("boom")
 
@@ -395,7 +395,7 @@ def test_permanent_error_is_not_retried(tmp_path):
             super().__init__([])
             self.calls = 0
 
-        def stream(self, *_args, **_kwargs):
+        def stream_response(self, *_args, **_kwargs):
             self.calls += 1
             raise ProviderError("HTTP 401 Unauthorized: bad api key", retryable=False)
 
@@ -432,7 +432,7 @@ def test_transient_error_is_retried(tmp_path, monkeypatch):
             super().__init__([])
             self.calls = 0
 
-        def stream(self, *_args, **_kwargs):
+        def stream_response(self, *_args, **_kwargs):
             self.calls += 1
             raise ProviderError("HTTP 503 Service Unavailable")
 
@@ -464,7 +464,7 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
             super().__init__([])
             self.calls = 0
 
-        def stream(self, *_args, **_kwargs):
+        def stream_response(self, *_args, **_kwargs):
             self.calls += 1
             attempt = self.calls
 
@@ -521,7 +521,7 @@ def failing_backend(reason, *, retryable=False):
             super().__init__([])
             self.calls = 0
 
-        def stream(self, *_args, **_kwargs):
+        def stream_response(self, *_args, **_kwargs):
             self.calls += 1
             raise ProviderError(
                 reason,
@@ -618,7 +618,7 @@ def test_unexpected_provider_failure_is_not_retried(during_stream):
     class BrokenBackend(FakeBackend):
         calls = 0
 
-        def stream(self, *_args, **_kwargs):
+        def stream_response(self, *_args, **_kwargs):
             self.calls += 1
             if not during_stream:
                 raise RuntimeError("provider bug")

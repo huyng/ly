@@ -72,8 +72,8 @@ def event(kind, **fields):
 
 
 def collect(backend, messages, tools=()):
-    """Drive backend.stream to completion, returning (events, message)."""
-    stream = backend.stream("system", list(messages), list(tools))
+    """Drive backend.stream_response to completion, returning (events, message)."""
+    stream = backend.stream_response("system", list(messages), list(tools))
     events = []
     while True:
         try:
@@ -127,11 +127,17 @@ def test_reasoning_summary_deltas_are_streamed_and_stored():
 
 
 def test_encrypted_reasoning_is_captured_and_survives_serialization():
+    summary = [{"type": "summary_text", "text": "Thinking"}]
     chunks = [
         event("response.output_item.added", item={"type": "reasoning", "id": "rs_1"}),
         event(
             "response.output_item.done",
-            item={"type": "reasoning", "id": "rs_1", "encrypted_content": "gAAA"},
+            item={
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": summary,
+                "encrypted_content": "gAAA",
+            },
         ),
         event("response.output_text.delta", delta="Done."),
     ]
@@ -140,13 +146,33 @@ def test_encrypted_reasoning_is_captured_and_survives_serialization():
     _, message = collect(backend, [UserMessage(content="hi")])
 
     assert last_request().body["include"] == ["reasoning.encrypted_content"]
-    assert message.encrypted_reasoning == "gAAA"
+    # `summary` is required on input and the id would not resolve, so the item
+    # is rebuilt rather than passed through.
+    assert message.reasoning_item == {
+        "type": "reasoning",
+        "summary": summary,
+        "encrypted_content": "gAAA",
+    }
 
     data = serialize_message(message)
-    assert data["encryptedReasoning"] == "gAAA"
+    assert data["reasoningItem"] == message.reasoning_item
     restored = deserialize_message(data)
     assert isinstance(restored, AssistantMessage)
-    assert restored.encrypted_reasoning == "gAAA"
+    assert restored.reasoning_item == message.reasoning_item
+
+
+def test_a_reasoning_item_without_the_blob_is_not_replayed():
+    chunks = [
+        event(
+            "response.output_item.done",
+            item={"type": "reasoning", "summary": [{"type": "summary_text"}]},
+        ),
+    ]
+    backend = make_backend_for(chunks)
+
+    _, message = collect(backend, [UserMessage(content="hi")])
+
+    assert message.reasoning_item is None
 
 
 def test_function_call_deltas_become_a_tool_call():
@@ -403,10 +429,16 @@ def test_request_uses_instructions_and_input_items():
 
 def test_encrypted_reasoning_is_replayed_only_for_the_in_flight_turn():
     backend = make_backend_for([])
+    old = {"type": "reasoning", "summary": [], "encrypted_content": "old"}
+    new = {
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": "two"}],
+        "encrypted_content": "new",
+    }
     history = [
         UserMessage(content="go"),
         AssistantMessage(
-            content=[TextContent(text="one")], model="m", encrypted_reasoning="old"
+            content=[TextContent(text="one")], model="m", reasoning_item=old
         ),
         AssistantMessage(
             content=[
@@ -414,7 +446,7 @@ def test_encrypted_reasoning_is_replayed_only_for_the_in_flight_turn():
                 ToolCall(id="call_1", name="read", arguments={}),
             ],
             model="m",
-            encrypted_reasoning="new",
+            reasoning_item=new,
         ),
         ToolResultMessage(tool_call_id="call_1", tool_name="read", output="ok"),
     ]
@@ -424,9 +456,10 @@ def test_encrypted_reasoning_is_replayed_only_for_the_in_flight_turn():
     assert last_request().body["input"] == [
         {"role": "user", "content": "go"},
         {"role": "assistant", "content": [{"type": "output_text", "text": "one"}]},
-        # The reasoning item must lead the turn it belongs to, and carries no id:
-        # nothing was stored server-side, so a replayed id would not resolve.
-        {"type": "reasoning", "encrypted_content": "new"},
+        # The reasoning item must lead the turn it belongs to, carrying the
+        # summary the API requires and no id: nothing was stored server-side,
+        # so a replayed id would not resolve.
+        new,
         {"role": "assistant", "content": [{"type": "output_text", "text": "two"}]},
         {
             "type": "function_call",

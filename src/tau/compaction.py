@@ -235,7 +235,7 @@ def _batches(
 
 def _complete(backend, request: str, abort_event) -> AssistantMessage:
     """One non-streamed (but still stream-parsed) completion with no tools."""
-    stream = backend.stream(
+    stream = backend.stream_response(
         SUMMARY_SYSTEM_PROMPT,
         [UserMessage(content=request)],
         [],

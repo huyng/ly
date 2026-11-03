@@ -38,7 +38,7 @@ class ScriptedBackend(ModelBackend):
         self.turns = list(turns)
         self.requests: list[dict[str, Any]] = []
 
-    def stream(self, system_prompt, messages, tools, abort_event=None):
+    def stream_response(self, system_prompt, messages, tools, abort_event=None):
         self.requests.append(
             {
                 "system": system_prompt,

@@ -69,8 +69,8 @@ def as_dict(value: object) -> dict[str, Any]:
 
 
 def collect(backend, messages):
-    """Drive provider.stream to completion, returning (events, message)."""
-    stream = backend.stream("system", messages, [])
+    """Drive backend.stream_response to completion, returning (events, message)."""
+    stream = backend.stream_response("system", messages, [])
     events = []
     while True:
         try:
@@ -424,7 +424,7 @@ def test_request_omits_tools_when_none_are_present():
 
 def test_request_includes_tool_schemas_when_present():
     backend, _ = make_backend([])
-    stream = backend.stream("system", [], [NoopTool()])
+    stream = backend.stream_response("system", [], [NoopTool()])
     with pytest.raises(StopIteration):
         next(stream)
 
@@ -564,7 +564,7 @@ def test_abort_mid_stream_closes_reader_and_reports_aborted():
         Provider(model="m", base_url="https://explicit.example/v1", api_key="k"),
         AbortingReader,
     )
-    stream = backend.stream(
+    stream = backend.stream_response(
         "system", [UserMessage(content="hi")], [], abort_event=abort
     )
 

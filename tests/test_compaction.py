@@ -31,18 +31,21 @@ from tau.messages import (
     UserMessage,
 )
 from tau.providers import Provider, ProviderError
+from tau.providers.backend import ModelBackend
 from tau.session import SessionManager
 
 
-class ScriptedProvider(Provider):
+class ScriptedBackend(ModelBackend):
     """Scripts a sequence of turns and records every request it receives."""
 
+    api = "fake"
+
     def __init__(self, turns: list[AssistantMessage]):
-        super().__init__(model="fake-model", base_url="fake", api_key="fake")
+        super().__init__(Provider(model="fake-model", base_url="fake", api_key="fake"))
         self.turns = list(turns)
         self.requests: list[dict[str, Any]] = []
 
-    def stream(self, system_prompt, messages, tools, abort_event=None, **_config):
+    def stream(self, system_prompt, messages, tools, abort_event=None):
         self.requests.append(
             {
                 "system": system_prompt,
@@ -65,8 +68,8 @@ def reply(text: str) -> AssistantMessage:
     return AssistantMessage(content=[TextContent(text=text)], model="fake")
 
 
-def summary_requests(provider) -> list[dict[str, Any]]:
-    return [r for r in provider.requests if r["system"] == SUMMARY_SYSTEM_PROMPT]
+def summary_requests(backend) -> list[dict[str, Any]]:
+    return [r for r in backend.requests if r["system"] == SUMMARY_SYSTEM_PROMPT]
 
 
 def unknown_tool_turn() -> AssistantMessage:
@@ -111,8 +114,8 @@ def build_history(manager, turns: int, usage_input: int = 0) -> None:
 
 def make_session(
     turns: list[AssistantMessage], **overrides
-) -> tuple[AgentSession, ScriptedProvider]:
-    provider = ScriptedProvider(turns)
+) -> tuple[AgentSession, ScriptedBackend]:
+    backend = ScriptedBackend(turns)
     config = CompactionConfig(
         enabled=True,
         threshold_tokens=overrides.pop("threshold_tokens", 1),
@@ -120,13 +123,13 @@ def make_session(
         max_summary_input_tokens=overrides.pop("max_summary_input_tokens", 30_000),
     )
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[],
         session_manager=SessionManager(in_memory=True),
         system_prompt="sys",
         compaction=config,
     )
-    return session, provider
+    return session, backend
 
 
 # -- split_index ---------------------------------------------------------------
@@ -230,12 +233,12 @@ def test_compact_reroots_the_branch_and_persists(tmp_path):
 
 
 def test_compaction_triggers_above_the_threshold():
-    session, provider = make_session([reply("SUM"), reply("final")])
+    session, backend = make_session([reply("SUM"), reply("final")])
     build_history(session.session_manager, 3)
 
     session.prompt("next question")
 
-    summary_request, real_request = provider.requests[0], provider.requests[1]
+    summary_request, real_request = backend.requests[0], backend.requests[1]
     assert summary_request["tools"] == []
     assert len(summary_request["messages"]) == 1
     assert "Previous summary" in summary_request["messages"][0].content
@@ -261,34 +264,34 @@ def test_compaction_keeps_recent_user_turns_verbatim():
 
 
 def test_no_compaction_below_the_threshold():
-    session, provider = make_session([reply("final")], threshold_tokens=10_000_000)
+    session, backend = make_session([reply("final")], threshold_tokens=10_000_000)
     build_history(session.session_manager, 3)
 
     session.prompt("next")
 
-    assert len(provider.requests) == 1
+    assert len(backend.requests) == 1
     assert not user_texts(session.messages)[0].startswith(SUMMARY_PREFIX)
 
 
 def test_compaction_triggers_on_measured_prompt_tokens():
-    # ~400 tokens by the char estimate, 120k as billed by the provider. Trusting
+    # ~400 tokens by the char estimate, 120k as billed by the backend. Trusting
     # the estimate here is how requests ran past the budget the threshold exists
     # to enforce.
-    session, provider = make_session(
+    session, backend = make_session(
         [reply("SUM"), reply("final")], threshold_tokens=100_000
     )
     build_history(session.session_manager, 3, usage_input=120_000)
 
     session.prompt("next question")
 
-    assert len(summary_requests(provider)) == 1
+    assert len(summary_requests(backend)) == 1
     assert user_texts(session.messages)[0].startswith(SUMMARY_PREFIX)
 
 
 def test_compaction_trusts_measured_usage_over_a_char_heavy_estimate():
     # The estimate reads this branch as ~10k tokens; the provider billed 1k for
     # it. Compacting on the estimate discards history that already fits.
-    session, provider = make_session([reply("final")], threshold_tokens=5_000)
+    session, backend = make_session([reply("final")], threshold_tokens=5_000)
     manager = session.session_manager
     for index in range(3):
         manager.append(UserMessage(content=f"question {index}"))
@@ -302,22 +305,22 @@ def test_compaction_trusts_measured_usage_over_a_char_heavy_estimate():
 
     session.prompt("next")
 
-    assert summary_requests(provider) == []
-    assert len(provider.requests) == 1
+    assert summary_requests(backend) == []
+    assert len(backend.requests) == 1
 
 
 def test_disabled_compaction_never_calls_the_provider():
-    session, provider = make_session([reply("final")])
+    session, backend = make_session([reply("final")])
     session.compaction = CompactionConfig(enabled=False, threshold_tokens=1)
     build_history(session.session_manager, 3)
 
     session.prompt("next")
 
-    assert len(provider.requests) == 1
+    assert len(backend.requests) == 1
 
 
 def test_failed_summary_leaves_history_untouched():
-    session, provider = make_session([failing(), reply("final")])
+    session, backend = make_session([failing(), reply("final")])
     build_history(session.session_manager, 3)
     errors: list[str] = []
     session.subscribe(
@@ -331,14 +334,14 @@ def test_failed_summary_leaves_history_untouched():
     assert any("compaction failed" in message for message in errors)
     assert user_texts(session.messages)[0].startswith("question 0")
     assert final_text(session.messages) == "final"
-    assert len(provider.requests) == 2  # summary attempt, then the real turn
+    assert len(backend.requests) == 2  # summary attempt, then the real turn
 
 
 @pytest.mark.parametrize("stop_reason", ["aborted", "length", "toolUse"])
 def test_unfinished_summary_leaves_history_untouched(stop_reason):
     summary = reply("partial notes")
     summary.stop_reason = stop_reason
-    session, provider = make_session([summary])
+    session, backend = make_session([summary])
     build_history(session.session_manager, 3)
     manager = session.session_manager
     entries = dict(manager.entries)
@@ -348,7 +351,7 @@ def test_unfinished_summary_leaves_history_untouched(stop_reason):
 
     assert manager.entries == entries
     assert manager.current_id == current_id
-    assert len(provider.requests) == 1
+    assert len(backend.requests) == 1
 
 
 def test_cancellation_before_branch_update_preserves_history(monkeypatch):
@@ -373,12 +376,12 @@ def test_cancellation_before_branch_update_preserves_history(monkeypatch):
 def test_cancelled_compaction_stops_the_run(stop_reason):
     summary = reply("partial notes")
     summary.stop_reason = stop_reason
-    session, provider = make_session([summary], max_summary_input_tokens=200)
+    session, backend = make_session([summary], max_summary_input_tokens=200)
     build_history(session.session_manager, 3)
     current_id = session.session_manager.current_id
 
-    class CancellingProvider(ScriptedProvider):
-        def stream(self, system_prompt, messages, tools, abort_event=None, **_config):
+    class CancellingBackend(ScriptedBackend):
+        def stream(self, system_prompt, messages, tools, abort_event=None):
             result = yield from super().stream(
                 system_prompt, messages, tools, abort_event
             )
@@ -386,15 +389,15 @@ def test_cancelled_compaction_stops_the_run(stop_reason):
                 session.abort()
             return result
 
-    provider = CancellingProvider(provider.turns)
-    session.provider = provider
+    backend = CancellingBackend(backend.turns)
+    session.backend = backend
 
     result = session.prompt("next")
 
     assert result.stop_reason == "aborted"
     assert session.busy is False
-    assert len(provider.requests) == 1
-    assert len(summary_requests(provider)) == 1
+    assert len(backend.requests) == 1
+    assert len(summary_requests(backend)) == 1
     assert session.session_manager.current_id != current_id
     assert user_texts(session.messages)[0].startswith("question 0")
     assert user_texts(session.messages)[-1] == "next"
@@ -404,10 +407,10 @@ def test_cancelled_compaction_stops_the_run(stop_reason):
 def test_failed_summary_is_not_retried_within_the_run():
     # An unknown-tool call forces a second loop iteration, which would try to
     # compact again if the failure flag were not sticky for the run.
-    session, provider = make_session([failing(), unknown_tool_turn(), reply("final")])
+    session, backend = make_session([failing(), unknown_tool_turn(), reply("final")])
     build_history(session.session_manager, 3)
     session.prompt("next")
-    assert len(summary_requests(provider)) == 1
+    assert len(summary_requests(backend)) == 1
 
 
 def test_compaction_events_are_emitted():
@@ -440,7 +443,7 @@ def test_summary_usage_counts_toward_session_usage():
 
 
 def test_failed_summary_usage_counts_toward_session_usage():
-    class FailingProvider(ScriptedProvider):
+    class FailingBackend(ScriptedBackend):
         def stream(self, *_args, **_kwargs):
             raise ProviderError(
                 "summary failed",
@@ -451,7 +454,7 @@ def test_failed_summary_usage_counts_toward_session_usage():
     usage = Usage()
     with pytest.raises(ProviderError, match="summary failed"):
         summarize(
-            FailingProvider([]),
+            FailingBackend([]),
             [UserMessage(content="hi")],
             CompactionConfig(),
             usage=usage,
@@ -461,7 +464,7 @@ def test_failed_summary_usage_counts_toward_session_usage():
 
 
 def test_large_histories_are_summarized_in_batches():
-    session, provider = make_session(
+    session, backend = make_session(
         [*(reply(f"SUM-{index}") for index in range(6)), reply("final")],
         max_summary_input_tokens=200,
     )
@@ -469,48 +472,46 @@ def test_large_histories_are_summarized_in_batches():
 
     session.prompt("next")
 
-    requests = summary_requests(provider)
+    requests = summary_requests(backend)
     assert len(requests) == 6
     assert "Previous summary" in requests[0]["messages"][0].content
     assert final_text(session.messages) == "final"
 
 
 def test_explicit_compact_works_without_a_prompt():
-    session, provider = make_session([reply("SUM")])
+    session, backend = make_session([reply("SUM")])
     build_history(session.session_manager, 3)
 
     assert session.compact() is True
-    assert len(provider.requests) == 1
+    assert len(backend.requests) == 1
     assert user_texts(session.messages)[0].startswith(SUMMARY_PREFIX)
 
 
 def test_compact_returns_false_with_too_few_turns():
-    session, provider = make_session([reply("SUM")])
+    session, backend = make_session([reply("SUM")])
     session.session_manager.append(UserMessage(content="only one"))
     assert session.compact() is False
-    assert provider.requests == []
+    assert backend.requests == []
 
 
 # -- summarize() ---------------------------------------------------------------
 
 
 def test_summarize_does_not_request_a_batch_after_cancellation():
-    provider = ScriptedProvider([reply("SUM")])
+    backend = ScriptedBackend([reply("SUM")])
     abort_event = threading.Event()
     abort_event.set()
 
     with pytest.raises(RuntimeError, match="compaction aborted"):
-        summarize(
-            provider, [UserMessage(content="hi")], CompactionConfig(), abort_event
-        )
+        summarize(backend, [UserMessage(content="hi")], CompactionConfig(), abort_event)
 
-    assert provider.requests == []
+    assert backend.requests == []
 
 
 def test_summarize_rejects_empty_summary():
-    provider = ScriptedProvider([reply("   ")])
+    backend = ScriptedBackend([reply("   ")])
     with pytest.raises(RuntimeError, match="empty summary"):
-        summarize(provider, [UserMessage(content="hi")], CompactionConfig())
+        summarize(backend, [UserMessage(content="hi")], CompactionConfig())
 
 
 # -- usefulness guard ----------------------------------------------------------
@@ -533,11 +534,11 @@ def test_summary_larger_than_the_history_is_not_applied():
 
 
 def test_unhelpful_summary_is_not_retried_within_the_run():
-    session, provider = make_session(
+    session, backend = make_session(
         [reply("z" * 5000), unknown_tool_turn(), reply("final")]
     )
     build_history(session.session_manager, 3)
 
     session.prompt("next")
 
-    assert len(summary_requests(provider)) == 1
+    assert len(summary_requests(backend)) == 1

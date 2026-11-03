@@ -21,27 +21,34 @@ from tau.messages import (
 from tau.providers import Provider, ProviderError
 from tau.providers.backend import ChatCompletionsBackend
 from tau.providers.errors import MissingBaseURLError, MissingCredentialsError
-from tau.providers.sse import stream_chunk_transport
+from tau.providers.sse import StreamReader
 from tau.tools import Tool
 
 
-class FakeTransport:
-    """Stands in for `stream_chunk_transport`, recording the request bytes."""
+class FakeReader(StreamReader):
+    """Stands in for the real reader: replays `chunks`, records the request."""
 
-    def __init__(self, chunks):
-        self.chunks = chunks
-        self.url: str | None = None
-        self.headers: dict[str, str] = {}
-        self.body: dict[str, Any] = {}
-        self.closed = False
+    chunks: ClassVar[list[dict[str, Any]]] = []
+    built: ClassVar[list["FakeReader"]] = []
 
-    def __call__(self, url, headers, body, timeout=None):
-        self.url, self.headers = url, headers
+    def __init__(self, url, headers, body, timeout=None):
+        self.url = url
+        self.headers = headers
         self.body = json.loads(body)
+        self.closed = False
+        FakeReader.built.append(self)
+
+    def read_chunks(self):
         try:
             yield from self.chunks
         finally:
             self.closed = True
+
+
+def last_request() -> FakeReader:
+    """The reader built for the most recent POST."""
+    assert FakeReader.built, "no request was posted"
+    return FakeReader.built[-1]
 
 
 def chunk(
@@ -61,9 +68,9 @@ def as_dict(value: object) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
-def collect(provider, messages):
+def collect(backend, messages):
     """Drive provider.stream to completion, returning (events, message)."""
-    stream = provider.stream("system", messages, [])
+    stream = backend.stream("system", messages, [])
     events = []
     while True:
         try:
@@ -72,15 +79,14 @@ def collect(provider, messages):
             return events, stop.value
 
 
-def make_provider(chunks, model="deepseek-flash") -> tuple[Provider, FakeTransport]:
-    transport = FakeTransport(chunks)
-    provider = Provider(
-        model=model,
-        base_url="https://api.deepseek.com",
-        api_key="test-key",
-        reader=transport,
-    )
-    return provider, transport
+def make_backend(
+    chunks, model="deepseek-flash", base_url="https://api.deepseek.com", **config
+) -> tuple[ChatCompletionsBackend, type[FakeReader]]:
+    """A chat backend whose reader replays `chunks` as the whole response."""
+    FakeReader.chunks = chunks
+    FakeReader.built.clear()
+    provider = Provider(model=model, base_url=base_url, api_key="test-key", **config)
+    return ChatCompletionsBackend(provider, FakeReader), FakeReader
 
 
 class NoopTool(Tool):
@@ -94,12 +100,9 @@ class NoopTool(Tool):
         raise NotImplementedError
 
 
-def body_with_tools(provider: Provider) -> dict[str, Any]:
+def body_with_tools(backend: ChatCompletionsBackend) -> dict[str, Any]:
     """The request body tau would send for one turn that has tools."""
-    backend = cast(ChatCompletionsBackend, provider.backend)
-    return json.loads(
-        backend._request_body("system", [], [NoopTool()], provider.model, False)
-    )
+    return json.loads(backend._make_request_body("system", [], [NoopTool()]))
 
 
 def test_reasoning_is_streamed_stored_and_sent_back():
@@ -111,9 +114,9 @@ def test_reasoning_is_streamed_stored_and_sent_back():
         chunk(content=" there"),
         chunk(finish_reason="stop", usage=usage),
     ]
-    provider, _ = make_provider(chunks)
+    backend, _ = make_backend(chunks)
 
-    events, message = collect(provider, [UserMessage(content="hi")])
+    events, message = collect(backend, [UserMessage(content="hi")])
 
     assert (
         "".join(e.delta for e in events if isinstance(e, ReasoningDeltaEvent))
@@ -136,24 +139,20 @@ def test_reasoning_is_streamed_stored_and_sent_back():
     assert isinstance(restored, AssistantMessage)
     assert restored.reasoning_content == "Let me think."
 
-    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
+    request = backend._request_messages(
         "system",
         [
             UserMessage(content="hi"),
             message,
             ToolResultMessage(tool_call_id="c1", tool_name="read", output="ok"),
         ],
-        provider.pass_reasoning_content,
     )
     assert as_dict(request[2])["reasoning_content"] == "Let me think."
 
 
 def test_reasoning_is_not_sent_to_non_deepseek_providers():
-    provider = Provider(
-        model="glm-4.6",
-        base_url="https://api.z.ai/api/paas/v4/",
-        api_key="test-key",
-        reader=FakeTransport([]),
+    backend, _ = make_backend(
+        [], model="glm-4.6", base_url="https://api.z.ai/api/paas/v4/"
     )
     message = AssistantMessage(
         content=[TextContent(text="hi")],
@@ -161,19 +160,16 @@ def test_reasoning_is_not_sent_to_non_deepseek_providers():
         reasoning_content="private reasoning",
     )
 
-    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
-        "system", [message], provider.pass_reasoning_content
-    )
+    request = backend._request_messages("system", [message])
 
     assert "reasoning_content" not in request[1]
 
 
 def test_reasoning_passthrough_can_be_forced_explicitly():
-    provider = Provider(
+    backend, _ = make_backend(
+        [],
         model="glm-4.6",
         base_url="https://api.z.ai/api/paas/v4/",
-        api_key="test-key",
-        reader=FakeTransport([]),
         pass_reasoning_content=True,
     )
     message = AssistantMessage(
@@ -182,15 +178,13 @@ def test_reasoning_passthrough_can_be_forced_explicitly():
         reasoning_content="private reasoning",
     )
 
-    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
-        "system", [message], provider.pass_reasoning_content
-    )
+    request = backend._request_messages("system", [message])
 
     assert as_dict(request[1])["reasoning_content"] == "private reasoning"
 
 
 def test_reasoning_is_sent_back_alongside_tool_calls():
-    provider, _ = make_provider([])
+    backend, _ = make_backend([])
     message = AssistantMessage(
         content=[
             ToolCall(id="call_1", name="read", arguments={"path": "a.py"}),
@@ -200,9 +194,7 @@ def test_reasoning_is_sent_back_alongside_tool_calls():
         reasoning_content="I should read the file.",
     )
 
-    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
-        "system", [message], provider.pass_reasoning_content
-    )
+    request = backend._request_messages("system", [message])
     assistant = as_dict(request[1])
 
     assert assistant["reasoning_content"] == "I should read the file."
@@ -214,7 +206,7 @@ def test_reasoning_is_sent_back_alongside_tool_calls():
     [("insufficient_system_resource", True), ("content_filter", False)],
 )
 def test_failure_finish_reasons_raise_classified_errors(reason, retryable):
-    provider, transport = make_provider(
+    backend, _ = make_backend(
         [
             chunk(finish_reason=reason),
             chunk(
@@ -224,15 +216,15 @@ def test_failure_finish_reasons_raise_classified_errors(reason, retryable):
     )
 
     with pytest.raises(ProviderError, match=reason) as caught:
-        collect(provider, [UserMessage(content="hi")])
+        collect(backend, [UserMessage(content="hi")])
 
     assert caught.value.retryable is retryable
     assert caught.value.usage is not None
     assert caught.value.usage.total_tokens == 15
-    assert transport.closed
+    assert last_request().closed
 
 
-# -- transport: SSE framing and HTTP errors ----------------------------------
+# -- reader: SSE framing and HTTP errors ----------------------------------
 
 
 class FakeResponse:
@@ -264,7 +256,7 @@ def fake_urlopen(monkeypatch, response=None, error=None):
     return calls
 
 
-def test_transport_parses_sse_and_stops_at_done(monkeypatch):
+def test_reader_parses_sse_and_stops_at_done(monkeypatch):
     body = [
         ": ping\n",
         "event: message\n",
@@ -277,7 +269,9 @@ def test_transport_parses_sse_and_stops_at_done(monkeypatch):
     response = FakeResponse(body)
     calls = fake_urlopen(monkeypatch, response)
 
-    chunks = list(stream_chunk_transport("https://x/v1/chat/completions", {}, b"{}"))
+    chunks = list(
+        StreamReader("https://x/v1/chat/completions", {}, b"{}").read_chunks()
+    )
 
     assert [c["choices"][0]["delta"]["content"] for c in chunks] == ["Hello", " there"]
     assert response.closed
@@ -285,17 +279,19 @@ def test_transport_parses_sse_and_stops_at_done(monkeypatch):
     assert calls[0]["request"].full_url == "https://x/v1/chat/completions"
 
 
-def test_transport_decodes_split_utf8_lines(monkeypatch):
+def test_reader_decodes_split_utf8_lines(monkeypatch):
     payload = 'data: {"choices": [{"delta": {"content": "héllo ✓"}}]}\n'
     raw = payload.encode()  # multi-byte chars, still one complete line
     fake_urlopen(monkeypatch, FakeResponse([raw]))
 
-    chunks = list(stream_chunk_transport("https://x/v1/chat/completions", {}, b"{}"))
+    chunks = list(
+        StreamReader("https://x/v1/chat/completions", {}, b"{}").read_chunks()
+    )
 
     assert chunks[0]["choices"][0]["delta"]["content"] == "héllo ✓"
 
 
-def test_transport_surfaces_api_error_message(monkeypatch):
+def test_reader_surfaces_api_error_message(monkeypatch):
     error = urllib.error.HTTPError(
         "https://x/v1/chat/completions",
         401,
@@ -306,26 +302,34 @@ def test_transport_surfaces_api_error_message(monkeypatch):
     fake_urlopen(monkeypatch, error=error)
 
     with pytest.raises(ProviderError) as caught:
-        list(stream_chunk_transport("https://x/v1/chat/completions", {}, b"{}"))
+        list(StreamReader("https://x/v1/chat/completions", {}, b"{}").read_chunks())
 
     assert "401" in str(caught.value)
     assert "bad api key" in str(caught.value)
 
 
-def test_transport_reports_unreachable_host(monkeypatch):
+def test_reader_reports_unreachable_host(monkeypatch):
     fake_urlopen(monkeypatch, error=urllib.error.URLError("name resolution failed"))
 
     with pytest.raises(ProviderError) as caught:
-        list(stream_chunk_transport("https://nope.invalid/chat/completions", {}, b"{}"))
+        list(
+            StreamReader(
+                "https://nope.invalid/chat/completions", {}, b"{}"
+            ).read_chunks()
+        )
 
     assert "cannot reach" in str(caught.value)
 
 
-def test_transport_marks_unreachable_host_retryable(monkeypatch):
+def test_reader_marks_unreachable_host_retryable(monkeypatch):
     fake_urlopen(monkeypatch, error=urllib.error.URLError("name resolution failed"))
 
     with pytest.raises(ProviderError) as caught:
-        list(stream_chunk_transport("https://nope.invalid/chat/completions", {}, b"{}"))
+        list(
+            StreamReader(
+                "https://nope.invalid/chat/completions", {}, b"{}"
+            ).read_chunks()
+        )
 
     assert caught.value.retryable is True
 
@@ -345,7 +349,7 @@ def test_transient_statuses_are_retryable(monkeypatch, code):
     fake_urlopen(monkeypatch, error=http_error(code, "Transient"))
 
     with pytest.raises(ProviderError) as caught:
-        list(stream_chunk_transport("https://x/v1/chat/completions", {}, b"{}"))
+        list(StreamReader("https://x/v1/chat/completions", {}, b"{}").read_chunks())
 
     assert caught.value.retryable is True
 
@@ -355,7 +359,7 @@ def test_permanent_statuses_are_not_retryable(monkeypatch, code):
     fake_urlopen(monkeypatch, error=http_error(code, "Permanent"))
 
     with pytest.raises(ProviderError) as caught:
-        list(stream_chunk_transport("https://x/v1/chat/completions", {}, b"{}"))
+        list(StreamReader("https://x/v1/chat/completions", {}, b"{}").read_chunks())
 
     assert caught.value.retryable is False
 
@@ -368,18 +372,18 @@ class TruncatedResponse(FakeResponse):
         raise http.client.IncompleteRead(b"", 512)
 
 
-def test_transport_wraps_a_stream_that_drops_mid_turn(monkeypatch):
+def test_reader_wraps_a_stream_that_drops_mid_turn(monkeypatch):
     fake_urlopen(monkeypatch, TruncatedResponse([]))
 
     with pytest.raises(ProviderError) as caught:
-        list(stream_chunk_transport("https://x/v1/chat/completions", {}, b"{}"))
+        list(StreamReader("https://x/v1/chat/completions", {}, b"{}").read_chunks())
 
     assert "stream interrupted" in str(caught.value)
     assert "IncompleteRead" in str(caught.value)
     assert caught.value.retryable is True
 
 
-def test_transport_wraps_a_socket_timeout(monkeypatch):
+def test_reader_wraps_a_socket_timeout(monkeypatch):
     class StalledResponse(FakeResponse):
         def __iter__(self):
             raise TimeoutError("the read operation timed out")
@@ -387,18 +391,18 @@ def test_transport_wraps_a_socket_timeout(monkeypatch):
     fake_urlopen(monkeypatch, StalledResponse([]))
 
     with pytest.raises(ProviderError) as caught:
-        list(stream_chunk_transport("https://x/v1/chat/completions", {}, b"{}"))
+        list(StreamReader("https://x/v1/chat/completions", {}, b"{}").read_chunks())
 
     assert "stream interrupted" in str(caught.value)
     assert caught.value.retryable is True
 
 
-def test_transport_does_not_rewrap_its_own_errors(monkeypatch):
+def test_reader_does_not_rewrap_its_own_errors(monkeypatch):
     """A malformed-event ProviderError must not be mistaken for a socket fault."""
     fake_urlopen(monkeypatch, FakeResponse(["data: not-json\n"]))
 
     with pytest.raises(ProviderError) as caught:
-        list(stream_chunk_transport("https://x/v1/chat/completions", {}, b"{}"))
+        list(StreamReader("https://x/v1/chat/completions", {}, b"{}").read_chunks())
 
     assert "malformed stream event" in str(caught.value)
 
@@ -407,52 +411,48 @@ def test_transport_does_not_rewrap_its_own_errors(monkeypatch):
 
 
 def test_request_omits_tools_when_none_are_present():
-    provider, transport = make_provider([chunk(content="ok")])
+    backend, _ = make_backend([chunk(content="ok")])
 
-    collect(provider, [UserMessage(content="hi")])
+    collect(backend, [UserMessage(content="hi")])
 
-    assert "tools" not in transport.body
-    assert transport.body["stream"] is True
-    assert transport.body["stream_options"] == {"include_usage": True}
-    assert transport.url == "https://api.deepseek.com/chat/completions"
-    assert transport.headers["Authorization"] == "Bearer test-key"
+    assert "tools" not in last_request().body
+    assert last_request().body["stream"] is True
+    assert last_request().body["stream_options"] == {"include_usage": True}
+    assert last_request().url == "https://api.deepseek.com/chat/completions"
+    assert last_request().headers["Authorization"] == "Bearer test-key"
 
 
 def test_request_includes_tool_schemas_when_present():
-    provider, transport = make_provider([])
-    stream = provider.stream("system", [], [NoopTool()])
+    backend, _ = make_backend([])
+    stream = backend.stream("system", [], [NoopTool()])
     with pytest.raises(StopIteration):
         next(stream)
 
-    assert transport.body["tools"][0]["function"]["name"] == "noop"
+    assert last_request().body["tools"][0]["function"]["name"] == "noop"
 
 
 def test_model_change_takes_effect_on_the_next_request():
-    provider, transport = make_provider([chunk(finish_reason="stop")])
-    provider.model = "switched-model"
+    backend, _ = make_backend([chunk(finish_reason="stop")])
+    backend.provider.model = "switched-model"
 
-    collect(provider, [UserMessage(content="hi")])
+    collect(backend, [UserMessage(content="hi")])
 
-    assert transport.body["model"] == "switched-model"
+    assert last_request().body["model"] == "switched-model"
 
 
 def test_response_records_api_and_model():
-    provider = Provider(
-        base_url="https://api.deepseek.com",
-        api_key="test",
-        reader=FakeTransport([chunk(content="ok")]),
-    )
-    _, message = collect(provider, [])
+    backend, _ = make_backend([chunk(content="ok")])
+    _, message = collect(backend, [])
 
     assert message.api == "openai-completions"
-    assert message.model == provider.model
+    assert message.model == backend.provider.model
 
 
 def test_request_omits_reasoning_effort(monkeypatch):
     monkeypatch.setenv("TAU_REASONING_EFFORT", "high")
-    provider, _ = make_provider([])
+    backend, _ = make_backend([])
 
-    assert "reasoning_effort" not in body_with_tools(provider)
+    assert "reasoning_effort" not in body_with_tools(backend)
 
 
 def test_tool_call_deltas_accumulate_across_chunks():
@@ -469,9 +469,9 @@ def test_tool_call_deltas_accumulate_across_chunks():
         chunk(tool_calls=[{"index": 0, "function": {"arguments": 'th": "a.py"}'}}]),
         chunk(finish_reason="tool_calls"),
     ]
-    provider, _ = make_provider(chunks)
+    backend, _ = make_backend(chunks)
 
-    events, message = collect(provider, [UserMessage(content="hi")])
+    events, message = collect(backend, [UserMessage(content="hi")])
 
     assert [e.name for e in events if isinstance(e, ToolNameEvent)] == ["read"]
     assert message.stop_reason == "toolUse"
@@ -479,7 +479,7 @@ def test_tool_call_deltas_accumulate_across_chunks():
 
 
 def test_reasoning_from_finished_turns_is_not_sent_back():
-    provider, _ = make_provider([])
+    backend, _ = make_backend([])
     first = AssistantMessage(
         content=[ToolCall(id="c1", name="read", arguments={"path": "a.py"})],
         model="deepseek-flash",
@@ -493,7 +493,7 @@ def test_reasoning_from_finished_turns_is_not_sent_back():
         reasoning_content="recent thoughts",
     )
 
-    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
+    request = backend._request_messages(
         "system",
         [
             UserMessage(content="go"),
@@ -501,7 +501,6 @@ def test_reasoning_from_finished_turns_is_not_sent_back():
             ToolResultMessage(tool_call_id="c1", tool_name="read", output="ok"),
             second,
         ],
-        provider.pass_reasoning_content,
     )
 
     assert "reasoning_content" not in as_dict(request[2])
@@ -509,57 +508,49 @@ def test_reasoning_from_finished_turns_is_not_sent_back():
 
 
 def test_request_omits_an_assistant_message_with_no_content():
-    provider = Provider(
-        model="deepseek-flash",
-        base_url="https://api.deepseek.com",
-        api_key="test-key",
-        reader=FakeTransport([]),
-    )
+    backend, _ = make_backend([])
     aborted = AssistantMessage(content=[], model="m", stop_reason="aborted")
 
-    request = cast(ChatCompletionsBackend, provider.backend)._request_messages(
+    request = backend._request_messages(
         "system",
         [UserMessage(content="hi"), aborted, UserMessage(content="again")],
-        provider.pass_reasoning_content,
     )
 
     assert [as_dict(entry)["role"] for entry in request] == ["system", "user", "user"]
 
 
 def test_stream_that_yields_no_text_has_no_empty_text_block():
-    provider, _ = make_provider([chunk(finish_reason="stop")])
+    backend, _ = make_backend([chunk(finish_reason="stop")])
 
-    _, message = collect(provider, [UserMessage(content="hi")])
+    _, message = collect(backend, [UserMessage(content="hi")])
 
     assert message.content == []
     assert message.stop_reason == "stop"
 
 
-@pytest.mark.parametrize("api", ["chat", "responses"])
-def test_missing_base_url_raises_at_construction(api):
+def test_missing_base_url_raises_at_construction():
     with pytest.raises(MissingBaseURLError) as exc:
-        Provider(api=api, api_key="test-key")
+        Provider(api_key="test-key")
     assert "TAU_BASE_URL" in str(exc.value)
     assert exc.value.retryable is False
 
 
-@pytest.mark.parametrize("api", ["chat", "responses"])
 @pytest.mark.parametrize(
     "base_url", ["https://api.openai.com/v1", "https://api.deepseek.com"]
 )
-def test_missing_credentials_raise_at_construction(api, base_url):
+def test_missing_credentials_raise_at_construction(base_url):
     with pytest.raises(MissingCredentialsError) as exc:
-        Provider(api=api, base_url=base_url)
+        Provider(base_url=base_url)
     assert str(exc.value) == "Missing credentials. Set TAU_API_KEY or pass --api-key."
 
 
-def test_abort_mid_stream_closes_transport_and_reports_aborted():
+def test_abort_mid_stream_closes_reader_and_reports_aborted():
     import threading
 
     abort = threading.Event()
 
-    class AbortingTransport(FakeTransport):
-        def __call__(self, url, headers, body, timeout=None):
+    class AbortingReader(FakeReader):
+        def read_chunks(self):
             try:
                 yield chunk(content="first")
                 abort.set()  # simulate Ctrl-C between chunks
@@ -567,14 +558,13 @@ def test_abort_mid_stream_closes_transport_and_reports_aborted():
             finally:
                 self.closed = True
 
-    transport = AbortingTransport([])
-    provider = Provider(
-        model="m",
-        base_url="https://explicit.example/v1",
-        api_key="k",
-        reader=transport,
+    FakeReader.chunks = []
+    FakeReader.built.clear()
+    backend = ChatCompletionsBackend(
+        Provider(model="m", base_url="https://explicit.example/v1", api_key="k"),
+        AbortingReader,
     )
-    stream = provider.stream(
+    stream = backend.stream(
         "system", [UserMessage(content="hi")], [], abort_event=abort
     )
 
@@ -589,4 +579,4 @@ def test_abort_mid_stream_closes_transport_and_reports_aborted():
     assert [e.delta for e in events if isinstance(e, TextDeltaEvent)] == ["first"]
     assert message.text == "first"
     assert message.stop_reason == "aborted"
-    assert transport.closed
+    assert last_request().closed

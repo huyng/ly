@@ -13,27 +13,35 @@ from tau.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from tau.providers import Provider, ProviderError
+from tau.providers import Provider, ProviderError, make_backend
 from tau.providers.backend import ChatCompletionsBackend, ResponsesBackend
+from tau.providers.sse import StreamReader
 from tau.tools import Tool
 
 
-class FakeTransport:
-    """Stands in for `stream_chunk_transport`, recording the request bytes."""
+class FakeReader(StreamReader):
+    """Stands in for the real reader: replays `chunks`, records the request."""
 
-    def __init__(self, chunks):
-        self.chunks = chunks
-        self.url: str | None = None
-        self.body: dict[str, Any] = {}
-        self.closed = False
+    chunks: ClassVar[list[dict[str, Any]]] = []
+    built: ClassVar[list["FakeReader"]] = []
 
-    def __call__(self, url, headers, body, timeout=None):
+    def __init__(self, url, headers, body, timeout=None):
         self.url = url
         self.body = json.loads(body)
+        self.closed = False
+        FakeReader.built.append(self)
+
+    def read_chunks(self):
         try:
             yield from self.chunks
         finally:
             self.closed = True
+
+
+def last_request() -> FakeReader:
+    """The reader built for the most recent POST."""
+    assert FakeReader.built, "no request was posted"
+    return FakeReader.built[-1]
 
 
 class NoopTool(Tool):
@@ -45,25 +53,25 @@ class NoopTool(Tool):
         raise NotImplementedError
 
 
-def make_provider_for(chunks, *, model="gpt-6.1-sol") -> tuple[Provider, FakeTransport]:
-    transport = FakeTransport(chunks)
+def make_backend_for(chunks, *, model="gpt-6.1-sol") -> ResponsesBackend:
+    """A responses backend whose reader replays `chunks` as the whole stream."""
+    FakeReader.chunks = chunks
+    FakeReader.built.clear()
     provider = Provider(
-        api="responses",
         model=model,
         base_url="https://api.openai.com/v1",
         api_key="test-key",
-        reader=transport,
     )
-    return provider, transport
+    return ResponsesBackend(provider, FakeReader)
 
 
 def event(kind, **fields):
     return {"type": kind, **fields}
 
 
-def collect(provider, messages, tools=()):
-    """Drive provider.stream to completion, returning (events, message)."""
-    stream = provider.stream("system", list(messages), list(tools))
+def collect(backend, messages, tools=()):
+    """Drive backend.stream to completion, returning (events, message)."""
+    stream = backend.stream("system", list(messages), list(tools))
     events = []
     while True:
         try:
@@ -84,9 +92,9 @@ def test_text_deltas_accumulate_and_usage_is_mapped():
             },
         ),
     ]
-    provider, transport = make_provider_for(chunks)
+    backend = make_backend_for(chunks)
 
-    events, message = collect(provider, [UserMessage(content="hi")])
+    events, message = collect(backend, [UserMessage(content="hi")])
 
     assert "".join(e.delta for e in events if isinstance(e, TextDeltaEvent)) == "Hello"
     assert message.text == "Hello"
@@ -95,7 +103,7 @@ def test_text_deltas_accumulate_and_usage_is_mapped():
     assert message.usage.input == 11
     assert message.usage.output == 4
     assert message.usage.total_tokens == 15
-    assert transport.url == "https://api.openai.com/v1/responses"
+    assert last_request().url == "https://api.openai.com/v1/responses"
 
 
 def test_reasoning_summary_deltas_are_streamed_and_stored():
@@ -104,9 +112,9 @@ def test_reasoning_summary_deltas_are_streamed_and_stored():
         event("response.reasoning_summary_text.delta", delta=" hard."),
         event("response.output_text.delta", delta="Done."),
     ]
-    provider, _ = make_provider_for(chunks)
+    backend = make_backend_for(chunks)
 
-    events, message = collect(provider, [UserMessage(content="hi")])
+    events, message = collect(backend, [UserMessage(content="hi")])
 
     assert (
         "".join(e.delta for e in events if isinstance(e, ReasoningDeltaEvent))
@@ -146,9 +154,9 @@ def test_function_call_deltas_become_a_tool_call():
         ),
         event("response.completed", response={"status": "completed"}),
     ]
-    provider, _ = make_provider_for(chunks)
+    backend = make_backend_for(chunks)
 
-    events, message = collect(provider, [UserMessage(content="read a.py")])
+    events, message = collect(backend, [UserMessage(content="read a.py")])
 
     names = [e.name for e in events if isinstance(e, ToolNameEvent)]
     assert names[-1] == "read"
@@ -182,9 +190,9 @@ def test_function_calls_preserve_stream_order_not_item_id_order():
             )
         )
     chunks.append(event("response.completed", response={"status": "completed"}))
-    provider, _ = make_provider_for(chunks)
+    backend = make_backend_for(chunks)
 
-    _, message = collect(provider, [UserMessage(content="read files")])
+    _, message = collect(backend, [UserMessage(content="read files")])
 
     assert [call.id for call in message.tool_calls] == ["call_0", "call_1"]
     assert [call.arguments for call in message.tool_calls] == [
@@ -226,9 +234,9 @@ def test_done_item_prefers_complete_arguments_and_falls_back_to_deltas(final_arg
         ),
         event("response.completed", response={"status": "completed"}),
     ]
-    provider, _ = make_provider_for(chunks)
+    backend = make_backend_for(chunks)
 
-    _, message = collect(provider, [UserMessage(content="read a.py")])
+    _, message = collect(backend, [UserMessage(content="read a.py")])
 
     assert message.tool_calls[0].arguments == {"path": "a.py"}
 
@@ -246,9 +254,9 @@ def test_done_item_supplies_arguments_the_deltas_missed():
             },
         ),
     ]
-    provider, _ = make_provider_for(chunks)
+    backend = make_backend_for(chunks)
 
-    _, message = collect(provider, [UserMessage(content="find py")])
+    _, message = collect(backend, [UserMessage(content="find py")])
 
     assert message.tool_calls[0].arguments == {"pattern": "*.py"}
 
@@ -260,10 +268,10 @@ def test_failed_response_reports_an_error():
             response={"status": "failed", "error": {"message": "boom"}},
         )
     ]
-    provider, _ = make_provider_for(chunks)
+    backend = make_backend_for(chunks)
 
     with pytest.raises(ProviderError, match="boom") as caught:
-        collect(provider, [UserMessage(content="hi")])
+        collect(backend, [UserMessage(content="hi")])
 
     assert caught.value.retryable is False
 
@@ -288,20 +296,20 @@ def test_stream_errors_are_classified_by_code(kind, code):
         if kind == "response.failed"
         else error
     )
-    provider, transport = make_provider_for([event(kind, **payload)])
+    backend = make_backend_for([event(kind, **payload)])
 
     with pytest.raises(ProviderError, match="failure details") as caught:
-        collect(provider, [UserMessage(content="hi")])
+        collect(backend, [UserMessage(content="hi")])
 
     assert caught.value.retryable is (code != "invalid_prompt")
     if kind == "response.failed":
         assert caught.value.usage is not None
         assert caught.value.usage.total_tokens == 15
-    assert transport.closed
+    assert last_request().closed
 
 
 def test_content_filtered_response_is_not_retryable():
-    provider, _ = make_provider_for(
+    backend = make_backend_for(
         [
             event(
                 "response.incomplete",
@@ -311,7 +319,7 @@ def test_content_filtered_response_is_not_retryable():
     )
 
     with pytest.raises(ProviderError, match="content_filter") as caught:
-        collect(provider, [UserMessage(content="hi")])
+        collect(backend, [UserMessage(content="hi")])
 
     assert caught.value.retryable is False
 
@@ -326,9 +334,9 @@ def test_incomplete_response_maps_to_length():
             },
         )
     ]
-    provider, _ = make_provider_for(chunks)
+    backend = make_backend_for(chunks)
 
-    _, message = collect(provider, [UserMessage(content="hi")])
+    _, message = collect(backend, [UserMessage(content="hi")])
 
     assert message.stop_reason == "length"
 
@@ -337,7 +345,7 @@ def test_incomplete_response_maps_to_length():
 
 
 def test_request_uses_instructions_and_input_items():
-    provider, transport = make_provider_for([])
+    backend = make_backend_for([])
     history = [
         UserMessage(content="read a.py"),
         AssistantMessage(
@@ -351,11 +359,11 @@ def test_request_uses_instructions_and_input_items():
         ToolResultMessage(tool_call_id="call_1", tool_name="read", output="print(1)"),
     ]
 
-    collect(provider, history)
+    collect(backend, history)
 
-    assert transport.body["instructions"] == "system"
-    assert transport.body["store"] is False
-    assert transport.body["input"] == [
+    assert last_request().body["instructions"] == "system"
+    assert last_request().body["store"] is False
+    assert last_request().body["input"] == [
         {"role": "user", "content": "read a.py"},
         {"role": "assistant", "content": [{"type": "output_text", "text": "Reading."}]},
         {
@@ -369,11 +377,11 @@ def test_request_uses_instructions_and_input_items():
 
 
 def test_tool_schemas_are_flat_on_requests():
-    provider, transport = make_provider_for([])
+    backend = make_backend_for([])
 
-    collect(provider, [UserMessage(content="hi")], tools=[NoopTool()])
+    collect(backend, [UserMessage(content="hi")], tools=[NoopTool()])
 
-    assert transport.body["tools"] == [
+    assert last_request().body["tools"] == [
         {
             "type": "function",
             "name": "noop",
@@ -385,11 +393,11 @@ def test_tool_schemas_are_flat_on_requests():
 
 def test_reasoning_summary_uses_default_effort(monkeypatch):
     monkeypatch.setenv("TAU_REASONING_EFFORT", "high")
-    provider, transport = make_provider_for([])
+    backend = make_backend_for([])
 
-    collect(provider, [UserMessage(content="hi")])
+    collect(backend, [UserMessage(content="hi")])
 
-    assert transport.body["reasoning"] == {"summary": "auto"}
+    assert last_request().body["reasoning"] == {"summary": "auto"}
 
 
 # -- backend selection -------------------------------------------------------
@@ -404,20 +412,21 @@ def test_reasoning_summary_uses_default_effort(monkeypatch):
         (" RESPONSES ", "responses"),
     ],
 )
-def test_provider_picks_the_backend(api, expected):
+def test_make_backend_picks_the_backend(api, expected):
     provider = Provider(
-        api=api,
         model="m",
         base_url="https://explicit.example/v1",
         api_key="test-key",
     )
 
-    assert isinstance(provider.backend, ResponsesBackend) is (expected == "responses")
+    backend = make_backend(provider, api)
+
+    assert isinstance(backend, ResponsesBackend) is (expected == "responses")
 
 
-def test_provider_defaults_to_chat():
+def test_make_backend_defaults_to_chat():
     provider = Provider(
         model="m", base_url="https://explicit.example/v1", api_key="test-key"
     )
 
-    assert isinstance(provider.backend, ChatCompletionsBackend)
+    assert isinstance(make_backend(provider), ChatCompletionsBackend)

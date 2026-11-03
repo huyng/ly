@@ -100,7 +100,7 @@ class TaskTool(Tool):
 
         cwd = self.cwd or os.getcwd()
         sub = AgentSession(
-            provider=self._parent.provider,
+            backend=self._parent.backend,
             tools=_explorer_tools(cwd),
             session_manager=SessionManager(in_memory=True),
             system_prompt=(

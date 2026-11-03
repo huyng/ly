@@ -1,6 +1,6 @@
 """The failures a model endpoint can raise, and which of them are worth retrying.
 
-Nothing here knows about HTTP or SSE: the transport classifies its own errors
+Nothing here knows about HTTP or SSE: the reader classifies its own errors
 using these types, and the agent loop decides how many times to try again.
 """
 

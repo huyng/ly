@@ -32,7 +32,7 @@ from .events import (
     ToolNameEvent,
 )
 from .prompts import build_system_prompt, context_files
-from .providers import Provider
+from .providers import Provider, make_backend
 from .providers.errors import MissingCredentialsError
 from .render import (
     GutterWriter,
@@ -71,7 +71,6 @@ def _flag(name: str) -> bool | None:
 
 def make_session(args: argparse.Namespace) -> AgentSession:
     provider = Provider(
-        api=args.api,
         model=args.model,
         base_url=args.base_url,
         api_key=args.api_key,
@@ -86,7 +85,7 @@ def make_session(args: argparse.Namespace) -> AgentSession:
     else:
         manager.new_session()
     return AgentSession(
-        provider=provider,
+        backend=make_backend(provider, args.api),
         tools=default_tools(cwd=os.getcwd()),
         session_manager=manager,
         system_prompt=build_system_prompt(os.getcwd()),
@@ -149,7 +148,7 @@ class Repl:
         self._reasoning = GutterWriter(
             self.theme, style=DIM, width=self.width, label="thinking"
         )
-        self._spinner.start(f"{self.session.provider.model} · thinking")
+        self._spinner.start(f"{self.session.backend.provider.model} · thinking")
 
     def _on_reasoning_delta(self, event: ReasoningDeltaEvent) -> None:
         self._spinner.stop()
@@ -286,7 +285,7 @@ class Repl:
         theme = self.theme
         print(
             f"{theme.bold('tau')} {theme.dim('v' + __version__)} {theme.dim('·')} "
-            f"{theme.model(self.session.provider.model)}"
+            f"{theme.model(self.session.backend.provider.model)}"
         )
         print(theme.dim(f"  • session {self.session.session_manager.file}"))
         for path, scope, _ in context_files(self.session.cwd):
@@ -356,7 +355,7 @@ class Repl:
         # so a rate built from it would shrink with every prompt.
         usage = self.session.usage
         if usage.total_tokens:
-            parts = [self.session.provider.model, format_duration(elapsed)]
+            parts = [self.session.backend.provider.model, format_duration(elapsed)]
             if elapsed and output_tokens:
                 parts.append(f"{output_tokens / elapsed:.0f} tok/s")
             # The cumulative `in` below cannot say how close the next request is
@@ -389,7 +388,9 @@ class Repl:
         elif command == "/model":
             if arg:
                 self.session.set_model(arg)
-            print(f"{theme.dim('model:')} {theme.model(self.session.provider.model)}")
+            print(
+                f"{theme.dim('model:')} {theme.model(self.session.backend.provider.model)}"
+            )
         elif command == "/tools":
             for tool in self.session.tools.values():
                 first = tool.description.split(". ")[0]

@@ -172,7 +172,7 @@ def render_transcript(messages: list[AgentMessage]) -> str:
 
 
 def summarize(
-    provider,
+    backend,
     messages: list[AgentMessage],
     config: CompactionConfig,
     abort_event=None,
@@ -194,7 +194,7 @@ def summarize(
             transcript=render_transcript(batch),
         )
         try:
-            message = _complete(provider, request, abort_event)
+            message = _complete(backend, request, abort_event)
         except ProviderError as exc:
             if usage is not None and exc.usage is not None:
                 usage.add(exc.usage)
@@ -233,9 +233,9 @@ def _batches(
         yield batch
 
 
-def _complete(provider, request: str, abort_event) -> AssistantMessage:
+def _complete(backend, request: str, abort_event) -> AssistantMessage:
     """One non-streamed (but still stream-parsed) completion with no tools."""
-    stream = provider.stream(
+    stream = backend.stream(
         SUMMARY_SYSTEM_PROMPT,
         [UserMessage(content=request)],
         [],
@@ -247,7 +247,7 @@ def _complete(provider, request: str, abort_event) -> AssistantMessage:
         except StopIteration as stop:
             message = stop.value
             if not isinstance(message, AssistantMessage):  # defensive
-                raise TypeError("provider did not return an assistant message")
+                raise TypeError("backend did not return an assistant message")
             return message
 
 

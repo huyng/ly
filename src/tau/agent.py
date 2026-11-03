@@ -39,7 +39,8 @@ from .messages import (
     UserMessage,
 )
 from .policy import basic_guard
-from .providers import Provider, ProviderError
+from .providers import ProviderError
+from .providers.backend import ModelBackend
 from .session import SessionManager
 from .tools import Tool, ToolResult, validate_arguments
 
@@ -56,7 +57,7 @@ class AgentSession:
 
     def __init__(
         self,
-        provider: Provider,
+        backend: ModelBackend,
         tools: list[Tool],
         session_manager: SessionManager,
         system_prompt: str,
@@ -65,7 +66,7 @@ class AgentSession:
         compaction: CompactionConfig | None = None,
         tool_guard: Callable[[ToolCall], str | None] | None = None,
     ):
-        self.provider = provider
+        self.backend = backend
         self.tools = {tool.name: tool for tool in tools}  # keyed for tool-call dispatch
         self.session_manager = session_manager
         self.system_prompt = system_prompt
@@ -141,7 +142,7 @@ class AgentSession:
 
     def set_model(self, model: str) -> None:
         """Switch the model for subsequent requests; recorded history is untouched."""
-        self.provider.model = model
+        self.backend.provider.model = model
 
     # -- prompting -------------------------------------------------------------
 
@@ -197,8 +198,8 @@ class AgentSession:
             # message so the branch never ends on a user turn with no reply.
             asst_message = AssistantMessage(
                 content=[],
-                model=self.provider.model,
-                api=self.provider.backend.api,
+                model=self.backend.provider.model,
+                api=self.backend.api,
                 stop_reason="aborted",
             )
             self.session_manager.append(asst_message)
@@ -257,7 +258,7 @@ class AgentSession:
         )
         try:
             summary = summarize(
-                self.provider, older, self.compaction, self._abort_event, self.usage
+                self.backend, older, self.compaction, self._abort_event, self.usage
             )
         except Exception as exc:
             self._compaction_blocked = True
@@ -315,7 +316,7 @@ class AgentSession:
                 while True:
                     try:
                         if stream is None:
-                            stream = self.provider.stream(
+                            stream = self.backend.stream(
                                 self.system_prompt,
                                 messages,
                                 tools,
@@ -347,8 +348,8 @@ class AgentSession:
                     return None
         error = AssistantMessage(
             content=[],
-            model=self.provider.model,
-            api=self.provider.backend.api,
+            model=self.backend.provider.model,
+            api=self.backend.api,
             stop_reason="error",
             error_message=str(last_error),
         )

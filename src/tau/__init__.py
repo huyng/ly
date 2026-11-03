@@ -36,11 +36,10 @@ def create_agent_session(
     used.
     """
     from .prompts import build_system_prompt
-    from .providers import Provider
+    from .providers import Provider, make_backend
     from .providers.provider import DEFAULT_MODEL
 
     provider = Provider(
-        api=api,
         model=model or DEFAULT_MODEL,
         base_url=base_url or "",
         api_key=api_key or "",
@@ -48,7 +47,7 @@ def create_agent_session(
     in_memory = not persistent
     session_manager = SessionManager(in_memory=in_memory)
     return AgentSession(
-        provider=provider,
+        backend=make_backend(provider, api),
         tools=tools if tools is not None else default_tools(cwd=cwd),
         session_manager=session_manager,
         system_prompt=build_system_prompt(cwd),

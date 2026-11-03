@@ -24,69 +24,75 @@ RETRYABLE_STATUSES = frozenset({408, 409, 425, 429})
 DEFAULT_TIMEOUT = 600.0
 
 
-class Transport(Protocol):
-    """`(url, headers, body) -> iterator of decoded chunks`, in request order."""
+class StreamReader:
+    """Reads the response to one POST as a stream of decoded chunks."""
 
-    def __call__(
+    def __init__(
         self,
         url: str,
         headers: dict[str, str],
         body: bytes,
-        timeout: float = ...,
-    ) -> ChunkStream: ...
+        timeout: float = DEFAULT_TIMEOUT,
+    ):
+        self.url = url
+        self.headers = headers
+        self.body = body
+        self.timeout = timeout
 
+    def read_chunks(self) -> ChunkStream:
+        """POST `body` and yield each SSE event's JSON payload.
 
-def stream_chunk_transport(
-    url: str,
-    headers: dict[str, str],
-    body: bytes,
-    timeout: float = DEFAULT_TIMEOUT,
-) -> ChunkStream:
-    """POST `body` and yield each SSE event's JSON payload.
+        Lines that are not `data:` (blank separators, `:` heartbeat comments,
+        `event:` fields) are skipped, as is the `[DONE]` terminator. Multiple
+        `data:` lines would form one event per the SSE spec, but OpenAI-style
+        APIs send exactly one JSON object per event, so each line is decoded
+        alone.
 
-    Lines that are not `data:` (blank separators, `:` heartbeat comments,
-    `event:` fields) are skipped, as is the `[DONE]` terminator. Multiple
-    `data:` lines would form one event per the SSE spec, but OpenAI-style APIs
-    send exactly one JSON object per event, so each line is decoded alone.
+        The response object is closed when the caller stops iterating, so
+        abandoning the stream (Ctrl-C, abort) drops the connection instead of
+        draining it.
+        """
 
-    The response object is closed when the caller stops iterating, so abandoning
-    the stream (Ctrl-C, abort) drops the connection instead of draining it.
-    """
-    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    try:
-        response = urllib.request.urlopen(request, timeout=timeout)
-    except urllib.error.HTTPError as err:
-        raise ProviderError(
-            _describe_http_error(err), retryable=_is_retryable_status(err.code)
-        ) from err
-    except urllib.error.URLError as err:
-        # DNS failure, refused connection, TLS problem, read timeout.
-        raise ProviderError(f"cannot reach {url}: {err.reason}") from err
+        request = urllib.request.Request(
+            self.url, data=self.body, headers=self.headers, method="POST"
+        )
+        try:
+            response = urllib.request.urlopen(request, timeout=self.timeout)
+        except urllib.error.HTTPError as err:
+            err_text = _describe_http_error(err)
+            raise ProviderError(
+                err_text, retryable=_is_retryable_status(err.code)
+            ) from err
+        except urllib.error.URLError as err:
+            # DNS failure, refused connection, TLS problem, read timeout.
+            raise ProviderError(f"cannot reach {self.url}: {err.reason}") from err
 
-    try:
-        with closing(response):
-            for raw in response:  # line-buffered by http.client; one SSE line each
-                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-                if not line.startswith("data:"):
-                    continue
-                payload = line[5:].strip()
-                if payload == "[DONE]":
-                    return
-                if not payload:
-                    continue
-                try:
-                    chunk = json.loads(payload)
-                except json.JSONDecodeError as err:  # never lose a turn to a stray line
-                    raise ProviderError(
-                        f"malformed stream event: {payload[:200]}"
-                    ) from err
-                if isinstance(chunk, dict):
-                    yield chunk
-    except (http.client.HTTPException, OSError) as err:
-        # A connection dropped or timed out mid-stream: the turn is incomplete,
-        # and a fresh request is the remedy. ProviderErrors raised above pass
-        # through untouched.
-        raise ProviderError(f"stream interrupted: {err!r}") from err
+        try:
+            with closing(response):
+                for raw in response:  # line-buffered by http.client; one SSE line each
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if payload == "[DONE]":
+                        return
+                    if not payload:
+                        continue
+                    try:
+                        chunk = json.loads(payload)
+                    except (
+                        json.JSONDecodeError
+                    ) as err:  # never lose a turn to a stray line
+                        raise ProviderError(
+                            f"malformed stream event: {payload[:200]}"
+                        ) from err
+                    if isinstance(chunk, dict):
+                        yield chunk
+        except (http.client.HTTPException, OSError) as err:
+            # A connection dropped or timed out mid-stream: the turn is incomplete,
+            # and a fresh request is the remedy. ProviderErrors raised above pass
+            # through untouched.
+            raise ProviderError(f"stream interrupted: {err!r}") from err
 
 
 def _describe_http_error(err: urllib.error.HTTPError) -> str:

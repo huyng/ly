@@ -1,4 +1,4 @@
-"""Tests for the tau agent harness using a scripted fake provider."""
+"""Tests for the tau agent harness using a scripted fake backend."""
 
 import json
 from typing import Any, ClassVar, cast
@@ -24,8 +24,9 @@ from tau.messages import (
     Usage,
     UserMessage,
 )
-from tau.providers import Provider, ProviderError
+from tau.providers import Provider, ProviderError, make_backend
 from tau.providers.backend import ModelBackend
+from tau.providers.sse import StreamReader
 from tau.session import SessionManager
 from tau.tools import Tool, ToolResult
 from tau.tools.task import TaskTool
@@ -37,12 +38,11 @@ class FakeBackend(ModelBackend):
     api = "fake"
 
     def __init__(self, turns: list[AssistantMessage]):
-        super().__init__()
+        super().__init__(Provider(model="fake-model", base_url="fake", api_key="fake"))
         self.turns = list(turns)
-        self.model = "fake-model"
         self.requests: list[tuple[str, list, list]] = []
 
-    def stream(self, system_prompt, messages, tools, abort_event=None, **_config):
+    def stream(self, system_prompt, messages, tools, abort_event=None):
         self.requests.append((system_prompt, list(messages), list(tools)))
         turn = self.turns.pop(0)
 
@@ -54,19 +54,6 @@ class FakeBackend(ModelBackend):
             return turn
 
         return generate()
-
-
-class ScriptedProvider(Provider):
-    """A real Provider whose backend is scripted instead of networked."""
-
-    def __init__(self, turns: list[AssistantMessage]):
-        super().__init__(model="fake-model", base_url="fake", api_key="fake")
-        self.script: FakeBackend = FakeBackend(turns)
-        self.backend: ModelBackend = self.script
-
-    @property
-    def requests(self):
-        return self.script.requests
 
 
 class EchoTool(Tool):
@@ -116,7 +103,7 @@ def make_session(tmp_path, turns) -> tuple[AgentSession, EchoTool, SessionManage
     manager.new_session()
     tool = EchoTool()
     session = AgentSession(
-        provider=ScriptedProvider(turns),
+        backend=FakeBackend(turns),
         tools=[tool],
         session_manager=manager,
         system_prompt="test system prompt",
@@ -166,8 +153,8 @@ def test_agent_loop_tool_call_and_final_text(tmp_path):
     assert session.last_assistant_text() == "all done"
 
     # the second request included the tool result
-    provider = cast(ScriptedProvider, session.provider)
-    _, second_request_messages, _ = provider.requests[1]
+    backend = cast(FakeBackend, session.backend)
+    _, second_request_messages, _ = backend.requests[1]
     assert isinstance(second_request_messages[-1], ToolResultMessage)
     assert second_request_messages[-1].output == "echo: hello"
 
@@ -296,10 +283,10 @@ def test_aborted_tool_stream_answers_every_call_before_next_prompt(tmp_path):
         stop_reason="aborted",
     )
     reply = AssistantMessage(content=[TextContent(text="resumed")], model="fake-model")
-    provider = ScriptedProvider([turn, reply])
+    backend = FakeBackend([turn, reply])
     tool = EchoTool()
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[tool],
         session_manager=SessionManager(in_memory=True),
         system_prompt="test system prompt",
@@ -318,7 +305,7 @@ def test_aborted_tool_stream_answers_every_call_before_next_prompt(tmp_path):
 
     history = session.messages
     assert session.prompt("continue") is reply
-    request_messages = provider.requests[1][1]
+    request_messages = backend.requests[1][1]
     assert request_messages[:-1] == history
     assert isinstance(request_messages[-1], UserMessage)
     assert request_messages[-1].content == "continue"
@@ -351,7 +338,7 @@ def test_interrupt_inside_a_tool_answers_every_call(tmp_path):
     manager = SessionManager(directory=tmp_path)
     manager.new_session()
     session = AgentSession(
-        provider=ScriptedProvider([turn]),
+        backend=FakeBackend([turn]),
         tools=[InterruptingTool()],
         session_manager=manager,
         system_prompt="test system prompt",
@@ -367,9 +354,8 @@ def test_interrupt_inside_a_tool_answers_every_call(tmp_path):
 
 
 def test_abort_during_retry_stops_without_another_request(tmp_path):
-    class FailingProvider(ScriptedProvider):
+    class FailingBackend(FakeBackend):
         api = "fake"
-        model = "fake-model"
 
         def __init__(self):
             super().__init__([])
@@ -379,9 +365,9 @@ def test_abort_during_retry_stops_without_another_request(tmp_path):
             self.calls += 1
             raise ProviderError("boom")
 
-    provider = FailingProvider()
+    backend = FailingBackend()
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="test system prompt",
@@ -396,15 +382,14 @@ def test_abort_during_retry_stops_without_another_request(tmp_path):
 
     assert final.stop_reason == "aborted"
     assert final.api == "fake"
-    assert provider.calls == 1
+    assert backend.calls == 1
 
 
 def test_permanent_error_is_not_retried(tmp_path):
     """A 401 must fail once, immediately — not three times over 3 seconds."""
 
-    class UnauthorizedProvider(ScriptedProvider):
+    class UnauthorizedBackend(FakeBackend):
         api = "fake"
-        model = "fake-model"
 
         def __init__(self):
             super().__init__([])
@@ -414,9 +399,9 @@ def test_permanent_error_is_not_retried(tmp_path):
             self.calls += 1
             raise ProviderError("HTTP 401 Unauthorized: bad api key", retryable=False)
 
-    provider = UnauthorizedProvider()
+    backend = UnauthorizedBackend()
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="test system prompt",
@@ -430,7 +415,7 @@ def test_permanent_error_is_not_retried(tmp_path):
 
     final = session.prompt("hi")
 
-    assert provider.calls == 1
+    assert backend.calls == 1
     assert final.stop_reason == "error"
     assert "401" in (final.error_message or "")
     # One error event only: no "retrying in Ns" chatter for a permanent fault.
@@ -440,9 +425,8 @@ def test_permanent_error_is_not_retried(tmp_path):
 def test_transient_error_is_retried(tmp_path, monkeypatch):
     monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
 
-    class FlakyProvider(ScriptedProvider):
+    class FlakyBackend(FakeBackend):
         api = "fake"
-        model = "fake-model"
 
         def __init__(self):
             super().__init__([])
@@ -452,9 +436,9 @@ def test_transient_error_is_retried(tmp_path, monkeypatch):
             self.calls += 1
             raise ProviderError("HTTP 503 Service Unavailable")
 
-    provider = FlakyProvider()
+    backend = FlakyBackend()
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="test system prompt",
@@ -462,7 +446,7 @@ def test_transient_error_is_retried(tmp_path, monkeypatch):
 
     final = session.prompt("hi")
 
-    assert provider.calls == 3
+    assert backend.calls == 3
     assert final.stop_reason == "error"
     assert final.api == "fake"
     assert "503" in (final.error_message or "")
@@ -473,9 +457,8 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
     MessageStartEvent per attempt to reset a half-rendered message."""
     monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
 
-    class FlakyProvider(ScriptedProvider):
+    class FlakyBackend(FakeBackend):
         api = "fake"
-        model = "fake-model"
 
         def __init__(self):
             super().__init__([])
@@ -496,9 +479,9 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
 
             return gen()
 
-    provider = FlakyProvider()
+    backend = FlakyBackend()
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="test system prompt",
@@ -508,7 +491,7 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
 
     final = session.prompt("hi")
 
-    assert provider.calls == 2
+    assert backend.calls == 2
     assert final.text == "partial done"
     assert [type(e) for e in events].count(MessageStartEvent) == 2
 
@@ -530,10 +513,9 @@ def test_create_agent_session_binds_tools_to_the_requested_cwd(tmp_path):
     }
 
 
-def failing_provider(reason, *, retryable=False):
-    class FailingProvider(ScriptedProvider):
+def failing_backend(reason, *, retryable=False):
+    class FailingBackend(FakeBackend):
         api = "fake"
-        model = "fake-model"
 
         def __init__(self):
             super().__init__([])
@@ -547,35 +529,35 @@ def failing_provider(reason, *, retryable=False):
                 usage=Usage(input=10, output=5, total_tokens=15),
             )
 
-    return FailingProvider()
+    return FailingBackend()
 
 
 def test_content_filter_is_not_retried(tmp_path, monkeypatch):
     monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
-    provider = failing_provider("content_filter")
+    backend = failing_backend("content_filter")
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="test system prompt",
     )
 
     assert session.prompt("hi").stop_reason == "error"
-    assert provider.calls == 1
+    assert backend.calls == 1
 
 
 def test_server_overload_is_retried(tmp_path, monkeypatch):
     monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
-    provider = failing_provider("insufficient_system_resource", retryable=True)
+    backend = failing_backend("insufficient_system_resource", retryable=True)
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="test system prompt",
     )
 
     assert session.prompt("hi").stop_reason == "error"
-    assert provider.calls == 3
+    assert backend.calls == 3
     assert session.usage.total_tokens == 45
 
 
@@ -583,9 +565,9 @@ def test_server_overload_is_retried(tmp_path, monkeypatch):
 @pytest.mark.parametrize("error_type", [RuntimeError, ProviderError])
 def test_subscriber_failure_is_not_retried(event_type, error_type):
     message = AssistantMessage(content=[TextContent(text="done")], model="fake")
-    provider = ScriptedProvider([message])
+    backend = FakeBackend([message])
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[],
         session_manager=SessionManager(in_memory=True),
         system_prompt="test",
@@ -599,7 +581,7 @@ def test_subscriber_failure_is_not_retried(event_type, error_type):
     with pytest.raises(error_type, match="callback failed"):
         session.prompt("hi")
 
-    assert len(provider.requests) == 1
+    assert len(backend.requests) == 1
     assert session.busy is False
     saved = [m for m in session.messages if isinstance(m, AssistantMessage)]
     assert len(saved) == (1 if event_type is MessageEndEvent else 0)
@@ -608,10 +590,10 @@ def test_subscriber_failure_is_not_retried(event_type, error_type):
 @pytest.mark.parametrize("error_type", [OSError, ProviderError])
 def test_persistence_failure_is_not_retried(monkeypatch, error_type):
     message = AssistantMessage(content=[TextContent(text="done")], model="fake")
-    provider = ScriptedProvider([message])
+    backend = FakeBackend([message])
     manager = SessionManager(in_memory=True)
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[],
         session_manager=manager,
         system_prompt="test",
@@ -627,13 +609,13 @@ def test_persistence_failure_is_not_retried(monkeypatch, error_type):
     with pytest.raises(error_type, match="write failed"):
         session.prompt("hi")
 
-    assert len(provider.requests) == 1
+    assert len(backend.requests) == 1
     assert session.busy is False
 
 
 @pytest.mark.parametrize("during_stream", [False, True])
 def test_unexpected_provider_failure_is_not_retried(during_stream):
-    class BrokenProvider(ScriptedProvider):
+    class BrokenBackend(FakeBackend):
         calls = 0
 
         def stream(self, *_args, **_kwargs):
@@ -647,9 +629,9 @@ def test_unexpected_provider_failure_is_not_retried(during_stream):
 
             return generate()
 
-    provider = BrokenProvider([])
+    backend = BrokenBackend([])
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[],
         session_manager=SessionManager(in_memory=True),
         system_prompt="test",
@@ -657,7 +639,7 @@ def test_unexpected_provider_failure_is_not_retried(during_stream):
     with pytest.raises(RuntimeError, match="provider bug"):
         session.prompt("hi")
 
-    assert provider.calls == 1
+    assert backend.calls == 1
     assert session.busy is False
 
 
@@ -666,40 +648,39 @@ def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
     monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
     requests = []
 
-    def transport(*args, **kwargs):
-        requests.append(args)
-        if api == "chat":
-            yield {
-                "choices": [
-                    {"delta": {}, "finish_reason": "insufficient_system_resource"}
-                ],
-                "usage": {
-                    "prompt_tokens": 10,
-                    "completion_tokens": 5,
-                    "total_tokens": 15,
-                },
-            }
-        else:
-            yield {
-                "type": "response.failed",
-                "response": {
-                    "error": {"code": "server_error", "message": "try later"},
+    class FakeReader(StreamReader):
+        def __init__(self, url, headers, body, timeout=None):
+            requests.append(url)
+
+        def read_chunks(self):
+            if api == "chat":
+                yield {
+                    "choices": [
+                        {"delta": {}, "finish_reason": "insufficient_system_resource"}
+                    ],
                     "usage": {
-                        "input_tokens": 10,
-                        "output_tokens": 5,
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
                         "total_tokens": 15,
                     },
-                },
-            }
+                }
+            else:
+                yield {
+                    "type": "response.failed",
+                    "response": {
+                        "error": {"code": "server_error", "message": "try later"},
+                        "usage": {
+                            "input_tokens": 10,
+                            "output_tokens": 5,
+                            "total_tokens": 15,
+                        },
+                    },
+                }
 
-    provider = Provider(
-        api=api,
-        base_url="https://explicit.example/v1",
-        api_key="test",
-        reader=transport,
-    )
+    provider = Provider(base_url="https://explicit.example/v1", api_key="test")
+    backend = make_backend(provider, api, FakeReader)
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=[],
         session_manager=SessionManager(in_memory=True),
         system_prompt="test",
@@ -718,7 +699,7 @@ def test_repl_renders_text_and_reasoning_deltas(capsys):
     from tau.events import MessageEndEvent, MessageStartEvent, ReasoningDeltaEvent
 
     class StubSession:
-        provider = type("P", (), {"model": "m"})()
+        backend = type("B", (), {"provider": type("P", (), {"model": "m"})()})()
         session_manager = type("S", (), {"file": "x"})
 
         def subscribe(self, cb):
@@ -777,7 +758,7 @@ def test_default_guard_blocks_before_execute(tmp_path):
     turn2 = AssistantMessage(content=[TextContent(text="done")], model="fake-model")
     tool = SpyWriteTool()
     session = AgentSession(
-        provider=ScriptedProvider([turn1, turn2]),
+        backend=FakeBackend([turn1, turn2]),
         tools=[tool],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="test system prompt",
@@ -807,7 +788,7 @@ def test_default_guard_allows_write_inside_cwd(tmp_path):
     turn2 = AssistantMessage(content=[TextContent(text="done")], model="fake-model")
     tool = SpyWriteTool()
     session = AgentSession(
-        provider=ScriptedProvider([turn1, turn2]),
+        backend=FakeBackend([turn1, turn2]),
         tools=[tool],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="test system prompt",
@@ -847,7 +828,7 @@ def test_task_subagent_inherits_tool_guard(tmp_path):
         AssistantMessage(content=[TextContent(text="final")], model="fake-model"),
     ]
     session = AgentSession(
-        provider=ScriptedProvider(turns),
+        backend=FakeBackend(turns),
         tools=[TaskTool(cwd=str(tmp_path))],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="parent prompt",

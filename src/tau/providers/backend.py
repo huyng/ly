@@ -1,10 +1,10 @@
 """Every wire format tau can speak, from the transport up.
 
-All backends share one contract: `stream` takes the transcript plus the
-configuration needed to reach the endpoint, yields events, and returns the
-AssistantMessage. Configuration is passed per call rather than stored, so there
-is only ever one copy of it and changing the model mid-session cannot leave a
-stale one behind.
+All backends share one contract: `stream` takes the transcript, yields events,
+and returns the AssistantMessage. What to talk to — model, endpoint, key,
+timeout — arrives as a `Provider` given to the constructor, and each request
+reads it fresh, so `provider.model = ...` takes effect on the next request
+rather than being shadowed by a copy taken at construction.
 
 - `ChatCompletionsBackend` — `/chat/completions`, the default, and the only
   flavour DeepSeek, z.ai and the rest of the OpenAI-compatible world speak.
@@ -35,34 +35,42 @@ from ..messages import (
 )
 from ..tools import Tool
 from .errors import ProviderError
-from .sse import DEFAULT_TIMEOUT, Chunk, Transport, stream_chunk_transport
+from .provider import Provider
+from .sse import Chunk, StreamReader
 
 
 class ModelBackend:
-    """Wire format for one API flavour; subclasses speak it in `stream`."""
+    """Wire format for one API flavour; subclasses speak it in `stream`.
+
+    Holds the provider it reads configuration from, and the reader that turns a
+    POST into chunks. What varies between subclasses is the request body and
+    how the stream is interpreted.
+    """
 
     api = ""
 
-    def __init__(self, reader: Transport | None = None):
-        self.reader = reader or stream_chunk_transport
+    def __init__(self, provider: Provider, reader: type[StreamReader] | None = None):
+        self.provider = provider
+        self.reader = reader or StreamReader
 
-    def _headers(self, api_key: str) -> dict[str, str]:
+    def _make_headers(self) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {self.provider.api_key}",
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
             "Accept-Encoding": "identity",
         }
 
-    def _post(
-        self, url: str, api_key: str, body: bytes, timeout: float
-    ) -> Generator[Chunk, None, None]:
-        """POST `body` and stream the decoded chunks.
+    def _post(self, path: str, body: bytes) -> Generator[Chunk, None, None]:
+        """POST `body` under the provider's base URL and stream the chunks.
 
         Closing the returned stream closes the connection underneath it, so
         abandoning a turn drops the response instead of draining it.
         """
-        chunks = self.reader(url, self._headers(api_key), body, timeout=timeout)
+        url = self.provider.base_url.rstrip("/") + path
+        chunks = self.reader(
+            url, self._make_headers(), body, timeout=self.provider.timeout
+        ).read_chunks()
         try:
             yield from chunks
         finally:
@@ -76,12 +84,6 @@ class ModelBackend:
         messages: list[AgentMessage],
         tools: list[Tool],
         abort_event: threading.Event | None = None,
-        *,
-        model: str,
-        base_url: str,
-        api_key: str,
-        timeout: float = DEFAULT_TIMEOUT,
-        pass_reasoning_content: bool = False,
     ) -> Generator[ProviderEvent, None, AssistantMessage]:
         """Stream one turn; yields events, returns the AssistantMessage."""
         raise NotImplementedError
@@ -108,9 +110,7 @@ class ChatCompletionsBackend(ModelBackend):
         self,
         system_prompt: str,
         messages: list[AgentMessage],
-        pass_reasoning_content: bool,
     ) -> list[dict[str, Any]]:
-
         request: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         # Only the trailing assistant message is still in flight. Echoing reasoning
         # for finished turns is dead weight — no model reads it again, and it was
@@ -142,7 +142,7 @@ class ChatCompletionsBackend(ModelBackend):
                 if (
                     index == in_flight
                     and message.reasoning_content
-                    and pass_reasoning_content
+                    and self.provider.pass_reasoning_content
                 ):
                     # DeepSeek-only field: outside the OpenAI request schema.
                     entry["reasoning_content"] = message.reasoning_content
@@ -178,19 +178,15 @@ class ChatCompletionsBackend(ModelBackend):
             for tool in tools
         ]
 
-    def _request_body(
+    def _make_request_body(
         self,
         system_prompt: str,
         messages: list[AgentMessage],
         tools: list[Tool],
-        model: str,
-        pass_reasoning_content: bool,
     ) -> bytes:
         body: dict[str, Any] = {
-            "model": model,
-            "messages": self._request_messages(
-                system_prompt, messages, pass_reasoning_content
-            ),
+            "model": self.provider.model,
+            "messages": self._request_messages(system_prompt, messages),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
@@ -206,20 +202,10 @@ class ChatCompletionsBackend(ModelBackend):
         messages: list[AgentMessage],
         tools: list[Tool],
         abort_event: threading.Event | None = None,
-        *,
-        model: str,
-        base_url: str,
-        api_key: str,
-        timeout: float = DEFAULT_TIMEOUT,
-        pass_reasoning_content: bool = False,
     ) -> Generator[ProviderEvent, None, AssistantMessage]:
         """Stream one turn; yields events, returns the AssistantMessage."""
-        body = self._request_body(
-            system_prompt, messages, tools, model, pass_reasoning_content
-        )
-        chunks = self._post(
-            base_url.rstrip("/") + "/chat/completions", api_key, body, timeout
-        )
+        body = self._make_request_body(system_prompt, messages, tools)
+        chunks = self._post("/chat/completions", body)
 
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -316,7 +302,7 @@ class ChatCompletionsBackend(ModelBackend):
 
         return AssistantMessage(
             content=content,
-            model=model,
+            model=self.provider.model,
             api=self.api,
             stop_reason="aborted" if aborted else stop_reason,
             usage=usage,
@@ -391,15 +377,14 @@ class ResponsesBackend(ModelBackend):
                 )
         return items
 
-    def _request_body(
+    def _make_request_body(
         self,
         system_prompt: str,
         messages: list[AgentMessage],
         tools: list[Tool],
-        model: str,
     ) -> bytes:
         body: dict[str, Any] = {
-            "model": model,
+            "model": self.provider.model,
             "instructions": system_prompt,
             "input": self._input_items(messages),
             "stream": True,
@@ -427,16 +412,10 @@ class ResponsesBackend(ModelBackend):
         messages: list[AgentMessage],
         tools: list[Tool],
         abort_event: threading.Event | None = None,
-        *,
-        model: str,
-        base_url: str,
-        api_key: str,
-        timeout: float = DEFAULT_TIMEOUT,
-        pass_reasoning_content: bool = False,
     ) -> Generator[ProviderEvent, None, AssistantMessage]:
         """Stream one turn; yields events, returns the AssistantMessage."""
-        body = self._request_body(system_prompt, messages, tools, model)
-        chunks = self._post(base_url.rstrip("/") + "/responses", api_key, body, timeout)
+        body = self._make_request_body(system_prompt, messages, tools)
+        chunks = self._post("/responses", body)
 
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -547,7 +526,7 @@ class ResponsesBackend(ModelBackend):
 
         return AssistantMessage(
             content=content,
-            model=model,
+            model=self.provider.model,
             api=self.api,
             stop_reason="aborted" if aborted else stop_reason,
             usage=usage,
@@ -595,3 +574,22 @@ def _mapping(value: Any) -> Mapping[str, Any]:
 def _as_int(value: Any) -> int:
     """Shared by both usage parsers."""
     return value if isinstance(value, int) else 0
+
+
+def make_backend(
+    provider: Provider, api: str | None = None, reader: type[StreamReader] | None = None
+) -> ModelBackend:
+    """Build the backend that speaks `api`, defaulting to chat-completions.
+
+    Args:
+        provider: The endpoint, credentials and model to read on each request.
+        api: Wire format to speak; unknown names are treated as chat-completions
+            so a blank flag picks the common flavour.
+        reader: Stand-in for the HTTP layer, for tests.
+
+    Returns:
+        A backend bound to `provider`.
+    """
+    if (api or "chat").strip().lower() == "responses":
+        return ResponsesBackend(provider, reader)
+    return ChatCompletionsBackend(provider, reader)

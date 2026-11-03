@@ -19,31 +19,32 @@ from tau.messages import (
     Usage,
 )
 from tau.providers import Provider
+from tau.providers.backend import ModelBackend
 from tau.session import SessionManager
 from tau.tools import default_tools
 from tau.tools.task import TaskTool
 
 
-class ScriptedProvider(Provider):
+class ScriptedBackend(ModelBackend):
     """Scripts a sequence of turns and records every request it receives.
 
-    The parent and its sub-agent share one provider instance, so `requests`
+    The parent and its sub-agent share one backend instance, so `requests`
     interleaves both conversations in call order: the sub-agent's turn lands
     between the parent's tool call and the parent's next turn.
     """
 
     def __init__(self, turns: list[AssistantMessage]):
-        super().__init__(model="fake-model", base_url="fake", api_key="fake")
+        super().__init__(Provider(model="fake-model", base_url="fake", api_key="fake"))
         self.turns = list(turns)
         self.requests: list[dict[str, Any]] = []
 
-    def stream(self, system_prompt, messages, tools, abort_event=None, **_config):
+    def stream(self, system_prompt, messages, tools, abort_event=None):
         self.requests.append(
             {
                 "system": system_prompt,
                 "messages": list(messages),
                 "tools": [tool.name for tool in tools],
-                "model": self.model,
+                "model": self.provider.model,
             }
         )
         turn = self.turns.pop(0)
@@ -85,19 +86,19 @@ def workspace(tmp_path):
 
 
 def make_session(workspace, turns):
-    provider = ScriptedProvider(turns)
+    backend = ScriptedBackend(turns)
     session = AgentSession(
-        provider=provider,
+        backend=backend,
         tools=default_tools(cwd=str(workspace)),
         session_manager=SessionManager(in_memory=True),
         system_prompt="parent prompt",
         cwd=str(workspace),
     )
-    return session, provider
+    return session, backend
 
 
 def test_task_runs_a_subagent_and_returns_only_its_report(workspace):
-    session, provider = make_session(
+    session, backend = make_session(
         workspace,
         [
             task_call(description="explore", prompt="Where is handler defined?"),
@@ -120,7 +121,7 @@ def test_task_runs_a_subagent_and_returns_only_its_report(workspace):
 @pytest.mark.parametrize("path", ["a.py", "missing.py"])
 def test_subagent_activity_is_live_and_kept_out_of_parent_context(workspace, path):
     call = ToolCall(id="child-1", name="read", arguments={"path": path})
-    session, provider = make_session(
+    session, backend = make_session(
         workspace,
         [
             task_call(description="explore", prompt="find handler"),
@@ -134,7 +135,7 @@ def test_subagent_activity_is_live_and_kept_out_of_parent_context(workspace, pat
     def observe(event):
         if isinstance(event, TaskActivityEvent):
             # Forwarding happens during execution, before the report request.
-            assert len(provider.requests) == 2
+            assert len(backend.requests) == 2
             activities.append(event)
 
     session.subscribe(observe)
@@ -153,11 +154,11 @@ def test_subagent_activity_is_live_and_kept_out_of_parent_context(workspace, pat
         isinstance(message, ToolResultMessage) and message.tool_call_id == call.id
         for message in session.messages
     )
-    assert "def handler" not in str(provider.requests[-1]["messages"])
+    assert "def handler" not in str(backend.requests[-1]["messages"])
 
 
 def test_subagent_works_in_a_fresh_context(workspace):
-    session, provider = make_session(
+    session, backend = make_session(
         workspace,
         [
             task_call(prompt="Where is handler defined?"),
@@ -167,46 +168,44 @@ def test_subagent_works_in_a_fresh_context(workspace):
     )
     session.prompt("a long parent question " * 50)
 
-    sub_request = provider.requests[1]
+    sub_request = backend.requests[1]
     assert len(sub_request["messages"]) == 1
     assert sub_request["messages"][0].content == "Where is handler defined?"
     assert "sub-agent" in sub_request["system"]
 
 
 def test_subagent_tool_set_is_read_only_and_non_recursive(workspace):
-    session, provider = make_session(
+    session, backend = make_session(
         workspace,
         [task_call(prompt="look around"), reply("ok"), reply("done")],
     )
     session.prompt("go")
 
-    parent_tools = provider.requests[0]["tools"]
-    sub_tools = provider.requests[1]["tools"]
+    parent_tools = backend.requests[0]["tools"]
+    sub_tools = backend.requests[1]["tools"]
     assert {"read", "grep", "glob", "bash"} == set(sub_tools)
     assert {"edit", "write", "task"}.isdisjoint(sub_tools)
     assert {"edit", "write", "task"} <= set(parent_tools)
 
 
 def test_subagent_inherits_the_current_model(workspace):
-    session, provider = make_session(
+    session, backend = make_session(
         workspace,
         [task_call(prompt="look around"), reply("ok"), reply("done")],
     )
     session.set_model("other-model")
     session.prompt("go")
 
-    assert provider.requests[1]["model"] == "other-model"
+    assert backend.requests[1]["model"] == "other-model"
 
 
 def test_subagent_sees_the_delegated_prompt_verbatim(workspace):
-    session, provider = make_session(
+    session, backend = make_session(
         workspace,
         [task_call(prompt="find the tests\nand list them"), reply("ok"), reply("done")],
     )
     session.prompt("go")
-    assert (
-        provider.requests[1]["messages"][0].content == "find the tests\nand list them"
-    )
+    assert backend.requests[1]["messages"][0].content == "find the tests\nand list them"
 
 
 def test_empty_subagent_report_is_replaced_with_a_note(workspace):

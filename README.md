@@ -97,11 +97,13 @@ A session is tau's record of a conversation. The pieces mirror pi:
   definitions; the provider streams an assistant response containing text
   and/or tool calls; tau executes each tool call and records the results.
   Tool results trigger another turn; otherwise the run ends.
-- **Provider** — one request per turn — `chat/completions` by default, or
+- **Backend** — one request per turn — `chat/completions` by default, or
   `/v1/responses` for models that refuse tools on chat-completions — streamed over
   `urllib` and parsed line by line as SSE, so there is no client SDK to depend
-  on. Text, reasoning, and tool-call deltas accumulate into the finished
-  message; `transport=` swaps the HTTP layer out (the tests inject a stand-in).
+  on. The backend holds a `Provider` (model, endpoint, credentials) and reads it
+  on every request, so a model switch takes effect immediately. Text, reasoning,
+  and tool-call deltas accumulate into the finished message; `reader=` swaps the
+  HTTP layer out (the tests inject a stand-in).
   Transient failures (429, 5xx, dropped streams, server overload) are retried up
   to three times with 1/2/4s backoff; permanent ones (bad key, bad request,
   content filtered) fail immediately. Ctrl-C aborts between chunks.
@@ -126,7 +128,7 @@ A session is tau's record of a conversation. The pieces mirror pi:
   history and a reduced tool set: `read`, `grep`, `glob`, `bash`, with no
   `edit` or `write` (not read-only — `bash` can still write). Only its
   final report returns to the parent, so exploration does not accumulate in
-  the main context. Sub-agents share the parent's provider (and therefore
+  the main context. Sub-agents share the parent's backend (and therefore
   `/model`) and its abort flag. The terminal shows their tool calls live,
   with completion/error markers, without adding child output to the parent.
 - **Compaction** — when the active branch passes a token threshold, the oldest
@@ -208,9 +210,9 @@ src/tau/
 ├── policy.py      # guard for tool calls (path escapes, obvious accidents)
 ├── prompts.py     # system prompt + AGENTS.md discovery
 ├── providers/     # model backends
-│   ├── sse.py     # one POST, urllib + SSE, decoded into JSON chunks
-│   ├── backend.py # ModelBackend + the chat-completions and responses backends
-│   ├── provider.py # Provider: config, and the choice of backend
+│   ├── sse.py     # StreamReader: one POST, urllib + SSE, decoded into chunks
+│   ├── backend.py # ModelBackend, both wire formats, and make_backend
+│   ├── provider.py # Provider: model, endpoint, credentials, timeout
 │   ├── errors.py  # ProviderError, and when a failure is worth retrying
 ├── render.py      # Markdown + unified-diff rendering
 ├── session.py     # JSONL session persistence (tree-shaped)

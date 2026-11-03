@@ -9,13 +9,14 @@ case of the other:
   models, which refuse function tools on chat-completions.
 
 Supporting modules, from the wire upward: ``sse`` (one POST, decoded chunks),
-``backend`` (the transport and every backend that speaks it), ``provider``
-(config, and the choice of backend), ``errors`` (failures). Import anything
-else from those modules directly: this package exposes only ``Provider`` and
-``ProviderError``.
+``backend`` (every backend that speaks it, and ``make_backend`` to pick one),
+``provider`` (the configuration a backend reads), ``errors`` (failures). Import
+anything else from those modules directly: this package exposes only
+``Provider``, ``make_backend`` and ``ProviderError``.
 """
 
+from .backend import make_backend
 from .errors import ProviderError
 from .provider import Provider
 
-__all__ = ["Provider", "ProviderError"]
+__all__ = ["Provider", "ProviderError", "make_backend"]

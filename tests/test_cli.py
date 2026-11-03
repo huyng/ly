@@ -13,23 +13,24 @@ from tau.messages import (
     Usage,
 )
 from tau.providers import Provider
+from tau.providers.backend import ModelBackend
 from tau.session import SessionManager
 from tau.theme import Theme
 
 
-class ScriptedProvider(Provider):
-    """A provider that never runs: the status line must not reach the model."""
+class ScriptedBackend(ModelBackend):
+    """A backend that never runs: the status line must not reach the model."""
 
     def __init__(self):
-        super().__init__(model="fake-model", base_url="fake", api_key="fake")
+        super().__init__(Provider(model="fake-model", base_url="fake", api_key="fake"))
 
-    def stream(self, *_args, **_config):
+    def stream(self, *_args, **_kwargs):
         raise AssertionError("the status line must not call the provider")
 
 
 def make_repl(threshold_tokens: int = 100_000, enabled: bool = True) -> Repl:
     session = AgentSession(
-        provider=ScriptedProvider(),
+        backend=ScriptedBackend(),
         tools=[],
         session_manager=SessionManager(in_memory=True),
         system_prompt="system",

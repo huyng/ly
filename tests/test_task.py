@@ -1,4 +1,4 @@
-"""Tests for the `task` sub-agent tool."""
+"""Tests for the `subagent` tool."""
 
 from typing import Any
 
@@ -22,7 +22,7 @@ from tau.providers import Provider
 from tau.providers.backend import ModelBackend
 from tau.session import SessionManager
 from tau.tools import default_tools
-from tau.tools.task import TaskTool
+from tau.tools.task import SubAgentTool
 
 
 class ScriptedBackend(ModelBackend):
@@ -73,7 +73,7 @@ def failing(message: str) -> AssistantMessage:
 
 def task_call(**arguments: Any) -> AssistantMessage:
     return AssistantMessage(
-        content=[ToolCall(id="call-1", name="task", arguments=arguments)],
+        content=[ToolCall(id="call-1", name="subagent", arguments=arguments)],
         model="fake",
         stop_reason="toolUse",
     )
@@ -184,8 +184,8 @@ def test_subagent_tool_set_is_read_only_and_non_recursive(workspace):
     parent_tools = backend.requests[0]["tools"]
     sub_tools = backend.requests[1]["tools"]
     assert {"read", "grep", "glob", "bash"} == set(sub_tools)
-    assert {"edit", "write", "task"}.isdisjoint(sub_tools)
-    assert {"edit", "write", "task"} <= set(parent_tools)
+    assert {"edit", "write", "subagent"}.isdisjoint(sub_tools)
+    assert {"edit", "write", "subagent"} <= set(parent_tools)
 
 
 def test_subagent_inherits_the_current_model(workspace):
@@ -223,7 +223,7 @@ def test_empty_subagent_report_is_replaced_with_a_note(workspace):
 
 
 def test_unbound_task_tool_is_an_error(tmp_path):
-    result = TaskTool(cwd=str(tmp_path)).execute(prompt="anything")
+    result = SubAgentTool(cwd=str(tmp_path)).execute(prompt="anything")
     assert result.is_error
     assert "not bound" in result.output
 
@@ -246,7 +246,7 @@ def test_task_requires_a_prompt(workspace):
 def test_tool_schema_only_requires_prompt(workspace):
     from tau.tools.validation import validate_arguments
 
-    tool = TaskTool(cwd=str(workspace))
+    tool = SubAgentTool(cwd=str(workspace))
     assert validate_arguments(tool.parameters, {"prompt": "x"}) == []
     assert validate_arguments(tool.parameters, {}) == ["arguments.prompt is required"]
 

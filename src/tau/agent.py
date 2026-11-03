@@ -85,7 +85,7 @@ class AgentSession:
         self.usage = Usage()  # cumulative totals across runs
 
         for tool in self.tools.values():
-            # Tools that need to reach back into the session (e.g. `task` spawning
+            # Tools that need to reach back into the session (e.g. `subagent` spawning
             # sub-agents) opt in by defining this; the rest are left alone.
             bind = getattr(tool, "bind_session", None)
             if callable(bind):

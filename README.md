@@ -117,14 +117,14 @@ A session is tau's record of a conversation. The pieces mirror pi:
   `~/.agents/AGENTS.md` and the nearest one discovered from the working
   directory upward. When both exist the prompt names both and their
   precedence, so the model reconciles user and project preferences.
-- **Tools** — `read`, `grep`, `glob`, `bash`, `edit`, `write`, `task`, bound
+- **Tools** — `read`, `grep`, `glob`, `bash`, `edit`, `write`, `subagent`, bound
   to the working directory. Tools run with the permissions of the tau process.
 - **Search** — `grep` and `glob` walk the tree in Python (no ripgrep
   dependency), prune `.git`, `node_modules`, `.venv`, `__pycache__` and build
   output, skip binaries, and cap their output, so a broad query cannot flood
   the transcript. `grep` returns ripgrep-shaped `path:line: text` lines and
   supports `glob` filters, context lines, and content/count/file modes.
-- **Sub-agents** — a `task` call runs a separate `AgentSession` with a fresh
+- **Sub-agents** — a `subagent` call runs a separate `AgentSession` with a fresh
   history and a reduced tool set: `read`, `grep`, `glob`, `bash`, with no
   `edit` or `write` (not read-only — `bash` can still write). Only its
   final report returns to the parent, so exploration does not accumulate in
@@ -218,6 +218,6 @@ src/tau/
 ├── session.py     # JSONL session persistence (tree-shaped)
 ├── spinner.py     # waiting-for-first-chunk spinner
 ├── theme.py       # ANSI styling, disabled for non-TTY / NO_COLOR
-└── tools/         # read, grep, glob, bash, edit, write, task
+└── tools/         # read, grep, glob, bash, edit, write, subagent
 ```
 

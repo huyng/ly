@@ -1,7 +1,7 @@
-"""Built-in tool set: read, grep, glob, bash, edit, write, task.
+"""Built-in tool set: read, grep, glob, bash, edit, write, subagent.
 
 Modeled after pi's defaults, plus the two tools that most change how a turn
-is spent: `grep`/`glob` (search without shell plumbing) and `task` (delegate
+is spent: `grep`/`glob` (search without shell plumbing) and `subagent` (delegate
 exploration to a sub-agent so its transcript never enters this context).
 """
 
@@ -10,7 +10,7 @@ from .bash import BashTool
 from .edit import EditTool, WriteTool
 from .read import ReadTool
 from .search import GlobTool, GrepTool
-from .task import TaskTool
+from .task import SubAgentTool
 from .validation import validate_arguments
 
 __all__ = [
@@ -19,7 +19,7 @@ __all__ = [
     "GlobTool",
     "GrepTool",
     "ReadTool",
-    "TaskTool",
+    "SubAgentTool",
     "Tool",
     "ToolResult",
     "WriteTool",
@@ -36,5 +36,5 @@ def default_tools(cwd: str | None = None) -> list[Tool]:
         BashTool(cwd=cwd),
         EditTool(cwd=cwd),
         WriteTool(cwd=cwd),
-        TaskTool(cwd=cwd),
+        SubAgentTool(cwd=cwd),
     ]

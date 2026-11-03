@@ -23,7 +23,7 @@ and writing new files.
   unique in the file. When changing multiple separate locations in one file,
   batch them into a single edit call instead of multiple edit calls.
 - Use write only for new files or complete rewrites.
-- Use task when answering needs many search/read calls whose raw output you do
+- Use subagent when answering needs many search/read calls whose raw output you do
   not need to keep. Give it a self-contained prompt: it cannot ask questions,
   and it cannot edit files.
 - Be concise in your responses.

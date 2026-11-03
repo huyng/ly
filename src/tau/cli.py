@@ -223,7 +223,7 @@ class Repl:
             "\n".join(self.theme.dim("│  ") + part for part in line.splitlines()),
             flush=True,
         )
-        self._spinner.start(f"task · {event.description or 'sub-agent'} …")
+        self._spinner.start(f"subagent · {event.description or 'sub-agent'} …")
 
     def _on_error(self, event: ErrorEvent) -> None:
         self._spinner.stop()

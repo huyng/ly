@@ -285,7 +285,7 @@ def summarize_tool_call(
             pattern + (f" in {short(root, max(width - 40, 8))}" if root else "")
         )
 
-    if name == "task":
+    if name == "subagent":
         label = arg("description") or arg("prompt")
         return theme.dim(short(label, max(width - 10, 16)))
 

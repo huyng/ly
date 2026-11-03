@@ -1,6 +1,6 @@
-"""Sub-agent delegation: the `task` tool.
+"""Sub-agent delegation: the `subagent` tool.
 
-A `task` call runs a **separate** `AgentSession` — same provider and model, a
+A `subagent` call runs a **separate** `AgentSession` — same provider and model, a
 fresh empty history, a read-only tool set — and returns only its final report.
 The parent's context stays clean, which is the point: a five-call exploration
 becomes one tool call plus a short summary instead of thousands of tokens of
@@ -42,8 +42,8 @@ or still unknown. No preamble, no narration of the steps you took.
 """
 
 
-class TaskTool(Tool):
-    name = "task"
+class SubAgentTool(Tool):
+    name = "subagent"
     description = (
         "Delegate a self-contained investigation to a sub-agent that works in "
         "its own fresh context and reports back a short summary. Use this when "
@@ -84,13 +84,13 @@ class TaskTool(Tool):
     def execute(self, prompt: str, description: str = "", **_: Any) -> ToolResult:
         if self._parent is None:
             return ToolResult(
-                "Error: the task tool is not bound to a session. Build the "
+                "Error: the subagent tool is not bound to a session. Build the "
                 "agent with AgentSession(...) so it can bind its tools.",
                 is_error=True,
             )
         if not isinstance(prompt, str) or not prompt.strip():
             return ToolResult(
-                "Error: task.prompt must be a non-empty string of instructions.",
+                "Error: subagent.prompt must be a non-empty string of instructions.",
                 is_error=True,
             )
 

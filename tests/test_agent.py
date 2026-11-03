@@ -29,7 +29,7 @@ from tau.providers.backend import ModelBackend
 from tau.providers.sse import StreamReader
 from tau.session import SessionManager
 from tau.tools import Tool, ToolResult
-from tau.tools.task import TaskTool
+from tau.tools.task import SubAgentTool
 
 
 class FakeBackend(ModelBackend):
@@ -810,7 +810,7 @@ def test_task_subagent_inherits_tool_guard(tmp_path):
     turns = [
         AssistantMessage(
             content=[
-                ToolCall(id="c1", name="task", arguments={"prompt": "investigate"})
+                ToolCall(id="c1", name="subagent", arguments={"prompt": "investigate"})
             ],
             model="fake-model",
             stop_reason="toolUse",
@@ -829,7 +829,7 @@ def test_task_subagent_inherits_tool_guard(tmp_path):
     ]
     session = AgentSession(
         backend=FakeBackend(turns),
-        tools=[TaskTool(cwd=str(tmp_path))],
+        tools=[SubAgentTool(cwd=str(tmp_path))],
         session_manager=SessionManager(directory=tmp_path),
         system_prompt="parent prompt",
         cwd=str(tmp_path),

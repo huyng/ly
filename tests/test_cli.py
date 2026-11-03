@@ -51,7 +51,9 @@ def make_repl(threshold_tokens: int = 100_000, enabled: bool = True) -> Repl:
 
 def test_task_activity_shows_calls_and_status_without_child_output(capsys):
     repl = make_repl()
-    parent = ToolCall(id="parent", name="task", arguments={"description": "explore"})
+    parent = ToolCall(
+        id="parent", name="subagent", arguments={"description": "explore"}
+    )
     repl._on_event(ToolExecutionStartEvent(parent))
     for name, arguments, is_error in [
         ("read", {"path": "a.py"}, False),
@@ -69,7 +71,7 @@ def test_task_activity_shows_calls_and_status_without_child_output(capsys):
         assert f"{'✗' if is_error else '✓'} {name}" in out
         assert "private child output" not in out
     assert "parent" in repl._tool_started
-    result = ToolResultMessage(parent.id, "task", "report")
+    result = ToolResultMessage(parent.id, "subagent", "report")
     repl._on_event(ToolExecutionEndEvent(parent, result))
     assert not repl._tool_started
     assert "report" in capsys.readouterr().out

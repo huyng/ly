@@ -101,6 +101,7 @@ class Repl:
         self.width = terminal_width()
         self.markdown = True
         self.show_thinking = True
+        self._pastes: dict[str, str] = {}
 
         self.session.subscribe(self._on_event)
         self._text_started = False
@@ -338,7 +339,9 @@ class Repl:
         than inserting newlines into its single-line editor, where they submit
         the prompt. Expand placeholders only after the user presses Enter.
         """
-        pastes: dict[str, str] = {}
+        # History keeps placeholders: literal newlines can submit on recall.
+        # Keep their contents across reads so recalled pastes still expand.
+        pastes = self._pastes
         failures: list[BaseException] = []
 
         def paste(text: str, state: int) -> str | None:
@@ -376,9 +379,6 @@ class Repl:
             expanded = line
             for marker, content in pastes.items():
                 expanded = expanded.replace(marker, content)
-            history_length = readline.get_current_history_length()
-            if pastes and readline.get_history_item(history_length) == line:
-                readline.replace_history_item(history_length - 1, expanded)
             return expanded
         finally:
             sys.stdout.write("\x1b[?2004l")

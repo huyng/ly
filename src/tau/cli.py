@@ -3,6 +3,9 @@
 Modes:
 - interactive (default): stream responses, use slash commands
 - print: `tau -p "prompt"` runs once and writes the final response
+
+Both modes run inside a Docker container by default; `--no-docker` stays on the
+host (see sandbox.py).
 """
 
 import argparse
@@ -15,7 +18,7 @@ from collections.abc import Callable
 from datetime import datetime
 from uuid import uuid4
 
-from . import __version__
+from . import __version__, sandbox
 from .agent import AgentSession
 from .events import (
     AgentEndEvent,
@@ -68,6 +71,13 @@ def _flag(name: str) -> bool | None:
     if raw is None:
         return None
     return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def use_container(argv: list[str]) -> bool:
+    """Return True when this process should hand off to `docker run` first."""
+    if sandbox.in_container() or "--no-docker" in argv:
+        return False
+    return _flag("TAU_DOCKER") is not False
 
 
 def make_session(args: argparse.Namespace) -> AgentSession:
@@ -290,6 +300,8 @@ class Repl:
             f"{theme.model(self.session.backend.provider.model)}"
         )
         print(theme.dim(f"  • session {self.session.session_manager.file}"))
+        if sandbox.in_container():
+            print(theme.dim(f"  • docker {sandbox.image_name()} · {self.session.cwd}"))
         for path, scope, _ in context_files(self.session.cwd):
             print(theme.dim(f"  • {scope.lower()} AGENTS.md {path}"))
         while True:
@@ -550,11 +562,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--resume", type=int, metavar="N", help="resume the n-th recent session"
     )
+    parser.add_argument(
+        "--no-docker",
+        action="store_true",
+        help="run on the host instead of inside a Docker container",
+    )
     parser.add_argument("--version", action="version", version=f"tau {__version__}")
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if use_container(argv):
+        sandbox.exec_in_docker(argv)
     args = build_parser().parse_args(argv)
 
     try:

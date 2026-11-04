@@ -98,6 +98,27 @@ def test_status_line_omits_the_threshold_when_compaction_is_disabled(capsys):
 # -- environment variables: the CLI is the only place that reads them ---------
 
 
+def test_banner_names_the_container_image(capsys, monkeypatch):
+    repl = make_repl()
+    monkeypatch.setenv("TAU_IN_CONTAINER", "1")
+    monkeypatch.setenv("TAU_IMAGE", "example/image:1")
+    monkeypatch.setattr(repl, "_read", lambda prompt: None)
+
+    repl.run()
+
+    assert "docker example/image:1" in capsys.readouterr().out
+
+
+def test_banner_stays_quiet_on_the_host(capsys, monkeypatch):
+    repl = make_repl()
+    monkeypatch.delenv("TAU_IN_CONTAINER", raising=False)
+    monkeypatch.setattr(repl, "_read", lambda prompt: None)
+
+    repl.run()
+
+    assert "docker" not in capsys.readouterr().out
+
+
 def test_env_variables_become_argument_defaults(monkeypatch):
     from tau.cli import build_parser
 

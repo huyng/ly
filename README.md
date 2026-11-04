@@ -93,6 +93,28 @@ press Enter to submit. On macOS's libedit backend, pasted text appears as a
 `[paste …: N chars]` placeholder until submission. Delete the placeholder to
 remove that paste.
 
+### Docker
+
+`tau` runs itself inside a Docker container by default: it re-executes as
+`docker run`, mounting the working directory at `/workspace`, so the tools can
+only touch the project. Sessions are bind-mounted from the host's
+`~/.tau/sessions`, and `~/.agents` is mounted read-only.
+
+The container runs as your host uid/gid, so files it writes into the project
+belong to you. Its `HOME` moves to `/tmp`, because a non-root uid cannot write
+the image's `/root`; anything the `bash` tool sets up via `~` (a `~/.gitconfig`,
+say) therefore lasts only for that container.
+
+```bash
+tau --no-docker                    # stay on the host (or TAU_DOCKER=0)
+export TAU_DOCKER_IMAGE=alpine       # image to use (default python:3.12)
+```
+
+The default image is `python:3.12`, which carries git, make, gcc and curl, so
+the `bash` tool has the usual build tools. Point `TAU_DOCKER_IMAGE` at another
+image when you need more. The startup banner names the image in use
+(`• docker python:3.12 · /workspace`), so the container is never a mystery.
+
 ## How it works
 
 A session is tau's record of a conversation. The pieces mirror pi:
@@ -220,6 +242,7 @@ src/tau/
 │   ├── provider.py # Provider: model, endpoint, credentials, timeout
 │   ├── errors.py  # ProviderError, and when a failure is worth retrying
 ├── render.py      # Markdown + unified-diff rendering
+├── sandbox.py     # re-exec into a Docker container, cwd mounted at /workspace
 ├── session.py     # JSONL session persistence (tree-shaped)
 ├── spinner.py     # waiting-for-first-chunk spinner
 ├── theme.py       # ANSI styling, disabled for non-TTY / NO_COLOR

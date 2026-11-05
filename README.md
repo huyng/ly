@@ -1,6 +1,6 @@
 # τ tau
 
-A minimal, extensible AI coding agent for the terminal, written in Python and modeled after [pi](https://pi.dev). It enables transparent sandboxing in Docker by default.
+A minimal, extensible AI coding agent for the terminal, written in Python and modeled after [pi](https://pi.dev). It transparently runs sandboxed inside Docker by default.
 
 When you run `tau` it automatically forks and launches itself inside a docker container mounted with your current working directory.
 

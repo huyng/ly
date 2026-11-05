@@ -27,7 +27,7 @@ def test_command_mounts_the_working_directory_and_forwards_argv(tmp_path, monkey
     assert f"{Path.cwd()}:/workspace" in command
     assert command[-7:] == [
         sandbox.DEFAULT_IMAGE,
-        "python",
+        "python3",
         "-P",
         "-m",
         "tau",

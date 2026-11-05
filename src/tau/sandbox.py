@@ -106,7 +106,7 @@ def docker_command(argv: list[str]) -> list[str]:
     command += ["-v", f"{package}:/opt/tau/tau:ro", "--env=PYTHONPATH=/opt/tau"]
     command += forwarded_env()
     command += ["--env=TAU_IN_CONTAINER=1", f"--env=TAU_IMAGE={image}", image]
-    command += ["python", "-P", "-m", "tau"]
+    command += ["python3", "-P", "-m", "tau"]
     return command + list(argv)
 
 

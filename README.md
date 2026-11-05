@@ -1,20 +1,19 @@
 # τ tau
 
-A minimal, extensible AI coding agent for the terminal, written in Python and
-modeled after [pi](https://pi.dev).
+A minimal, extensible AI coding agent for the terminal, written in Python and modeled after [pi](https://pi.dev). It enables transparent sandboxing in Docker by default.
+
+When you run `tau` it automatically forks and launches itself inside a docker container mounted with your current working directory.
 
 tau replicates pi's core architecture — the agent loop, streaming events,
 session persistence, tool execution, and context-file discovery — in roughly
-1000 lines of dependency-free Python code (excluding tests).
+3000 lines of dependency-free Python code.
 
 ## Installation & Usage
 
-Requires Python 3.12+. There are no runtime dependencies — installation pulls
-nothing beyond the standard library.
+Requires Python 3.12+. There are no runtime dependencies — installation pulls nothing beyond the standard library.
 
 ```bash
 uv tool install git+https://github.com/huyng/tau
-tau
 ```
 
 Point tau to an LLM provider by setting environment variables. It is compatible with any OpenAI-API compatible endpoint.
@@ -25,58 +24,6 @@ export TAU_MODEL=gpt-4.1            # The model you would like to use
 export TAU_BASE_URL=
 ```
 
-Only `TAU_API_KEY` is read for API keys; provider-specific key environment
-variables are ignored. Use `--api-key` to override it for one invocation.
-
-### Providers
-
-**DeepSeek** — DeepSeek's API is OpenAI-compatible. Current model names are
-`deepseek-flash` and `deepseek-v4-pro` (older deployments may still accept
-`deepseek-chat` / `deepseek-reasoner`).
-
-```bash
-export TAU_BASE_URL=https://api.deepseek.com
-export TAU_API_KEY=your-deepseek-key
-export TAU_MODEL=deepseek-flash
-```
-
-
-**Z.ai (GLM models)** — [z.ai](https://z.ai) has two OpenAI-compatible
-endpoints with **separate billing**. Pick the one matching where your
-balance lives, or you will get "Insufficient balance" errors:
-
-- **GLM Coding Plan subscription** → `https://api.z.ai/api/coding/paas/v4/`
-- **Pay-as-you-go platform balance** → `https://api.z.ai/api/paas/v4/`
-
-```bash
-# GLM Coding Plan
-export TAU_BASE_URL=https://api.z.ai/api/coding/paas/v4/
-export TAU_API_KEY=your-zai-key
-export TAU_MODEL=glm-4.6
-```
-
-```bash
-# Pay-as-you-go
-export TAU_BASE_URL=https://api.z.ai/api/paas/v4/
-export TAU_API_KEY=your-zai-key
-export TAU_MODEL=glm-4.6
-```
-
-**OpenAI Responses API** — from GPT-5.4 on, `chat/completions` allows function
-tools only with `reasoning_effort: none`, and `gpt-6-astra` / `gpt-6.1-sol`
-reject `none` outright. Those models work only on `/v1/responses`, which tau
-speaks when asked (`--api responses` or `TAU_API=responses`):
-
-```bash
-export TAU_API=responses
-export TAU_MODEL=gpt-6.1-sol
-```
-
-tau does not read `reasoning_content` off this endpoint; reasoning arrives as
-a summary, so `/thinking` shows the model's own summary rather than raw
-reasoning.
-
-
 ## Use
 
 ```bash
@@ -86,36 +33,32 @@ tau -p "what does this repo do?"   # print mode: run once, write final response
 tau --resume 2                     # resume a previous session
 ```
 
-Ctrl-C aborts the active run (steering between turns). Ctrl-D exits.
+### Sandboxing with Docker
 
-In terminals supporting bracketed paste, multiline pastes stay in one prompt;
-press Enter to submit. On macOS's libedit backend, pasted text appears as a
-`[paste …: N chars]` placeholder until submission. Delete the placeholder to
-remove that paste.
-
-### Docker
-
-`tau` runs itself inside a Docker container by default: it re-executes as
-`docker run`, mounting the working directory at `/workspace`, so the tools can
-only touch the project. Sessions are bind-mounted from the host's
-`~/.tau/sessions`, and `~/.agents` is mounted read-only.
+By default, `tau` runs inside a Docker container by forking and re-executing itself as `docker run`, mounting the working directory at `/workspace`, so the tools can only touch the project. Sessions are bind-mounted from the host's `~/.tau/sessions`, and `~/.agents` is mounted read-only.
 
 The container runs as your host uid/gid, so files it writes into the project
 belong to you. Its `HOME` moves to `/tmp`, because a non-root uid cannot write
-the image's `/root`; anything the `bash` tool sets up via `~` (a `~/.gitconfig`,
-say) therefore lasts only for that container.
+the image's `/root`; anything the `bash` tool sets up via `~` (a `~/.gitconfig`, say) therefore lasts only for that container.
 
 ```bash
-tau --nosandbox                     # stay on the host (or TAU_DOCKER=0)
-export TAU_DOCKER_IMAGE=alpine       # image to use (default python:3.12)
+export TAU_DOCKER_IMAGE=python:3.12       # image to use (default python:3.12)
+tau
 ```
 
 The default image is `python:3.12`, which carries git, make, gcc and curl, so
 the `bash` tool has the usual build tools. Point `TAU_DOCKER_IMAGE` at another
-image when you need more. The startup banner names the image in use
-(`• docker python:3.12 · /workspace`), so the container is never a mystery. In
-print mode the same fact goes to stderr (`tau: docker python:3.12`) and stdout
-carries only the answer, so `tau -p … | jq` keeps working.
+image when you need more; it must provide `python3` at version 3.12 or newer,
+since that is what tau runs on inside it. The startup banner names the image in
+use (`• docker python:3.12 · /workspace`), so the container is never a mystery.
+In print mode the same fact goes to stderr (`tau: docker python:3.12`) and
+stdout carries only the answer, so `tau -p … | jq` keeps working.
+
+You can run tau without a sandbox with the `--nosandbox` flag.
+
+```bash
+tau --nosandbox     # stay on the host (or TAU_DOCKER=0)
+```
 
 ## How it works
 
@@ -131,11 +74,7 @@ A session is tau's record of a conversation. The pieces mirror pi:
   `urllib` and parsed line by line as SSE, so there is no client SDK to depend
   on. The backend holds a `Provider` (model, endpoint, credentials) and reads it
   on every request, so a model switch takes effect immediately. Text, reasoning,
-  and tool-call deltas accumulate into the finished message; `reader=` swaps the
-  HTTP layer out (the tests inject a stand-in).
-  Transient failures (429, 5xx, dropped streams, server overload) are retried up
-  to three times with 1/2/4s backoff; permanent ones (bad key, bad request,
-  content filtered) fail immediately. Ctrl-C aborts between chunks.
+  and tool-call deltas accumulate into the finished message.
 - **Events** — subscribe with `session.subscribe(callback)` to observe
   message start/end, text deltas, tool execution, and run lifecycle.
 - **Sessions** — append-only JSONL under `~/.tau/sessions/<date>/` (override

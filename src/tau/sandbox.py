@@ -26,6 +26,7 @@ NOT_FORWARDED = frozenset(
         "TAU_IN_CONTAINER",
         "TAU_DOCKER",
         "TAU_DOCKER_IMAGE",
+        "TAU_HOST_DIR",
         "TAU_IMAGE",
         "TAU_SESSIONS_DIR",
     }
@@ -40,6 +41,16 @@ def in_container() -> bool:
 def image_name() -> str:
     """The image this container was started from, as the host named it."""
     return os.environ.get("TAU_IMAGE") or "unknown"
+
+
+def host_dir() -> str | None:
+    """The host directory mounted at the workspace, as the host spelled it.
+
+    Returns:
+        The host path, or None when this is not a container (where the
+        workspace already is the host directory) or the host did not say.
+    """
+    return os.environ.get("TAU_HOST_DIR")
 
 
 def forwarded_env() -> list[str]:
@@ -105,6 +116,9 @@ def docker_command(argv: list[str]) -> list[str]:
     package = Path(tau.__file__).parent
     command += ["-v", f"{package}:/opt/tau/tau:ro", "--env=PYTHONPATH=/opt/tau"]
     command += forwarded_env()
+    # The container sees /workspace; only this tells the banner which host
+    # directory that is, and the banner is how the mount is made visible.
+    command += [f"--env=TAU_HOST_DIR={Path.cwd()}"]
     command += ["--env=TAU_IN_CONTAINER=1", f"--env=TAU_IMAGE={image}", image]
     command += ["python3", "-P", "-m", "tau"]
     return command + list(argv)

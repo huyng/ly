@@ -1,6 +1,6 @@
 """System prompt assembly: base instructions plus discovered context files.
 
-Like pi, tau builds the system prompt from base instructions and context
+tau builds the system prompt from base instructions and context
 files (AGENTS.md) discovered in the working directory and its ancestors, plus
 a user-level AGENTS.md in ~/.agents. When both scopes carry instructions the
 prompt says so instead of merging them: a personal default and a project

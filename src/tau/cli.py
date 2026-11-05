@@ -294,6 +294,8 @@ class Repl:
     # -- main loop ----------------------------------------------------------------
 
     def run(self) -> None:
+
+        # print startup banner
         theme = self.theme
         print(
             f"{theme.bold('tau')} {theme.dim('v' + __version__)} {theme.dim('·')} "
@@ -301,7 +303,12 @@ class Repl:
         )
         print(theme.dim(f"  • session {self.session.session_manager.file}"))
         if sandbox.in_container():
-            print(theme.dim(f"  • docker {sandbox.image_name()} · {self.session.cwd}"))
+            # The container's own cwd is always /workspace, so name the host
+            # directory too: that is the one the user can type in another shell.
+            host = sandbox.host_dir()
+            where = f"{host} → {self.session.cwd}" if host else self.session.cwd
+            detail = f"  • sandboxed docker {sandbox.image_name()} · {where}"
+            print(theme.dim(detail))
         for path, scope, _ in context_files(self.session.cwd):
             print(theme.dim(f"  • {scope.lower()} AGENTS.md {path}"))
         while True:
@@ -499,7 +506,7 @@ class Repl:
 
 
 def print_mode(args: argparse.Namespace) -> None:
-    """Like `pi -p`: run one prompt, write the final response to stdout.
+    """Run one prompt, write the final response to stdout.
 
     Deliberately plain: no styling, no tool chatter, no spinners. Failures go
     to stderr with a non-zero exit, so `tau -p` is usable in scripts.

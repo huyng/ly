@@ -50,7 +50,13 @@ The default image is `python:3.12`, which carries git, make, gcc and curl, so
 the `bash` tool has the usual build tools. Point `TAU_DOCKER_IMAGE` at another
 image when you need more; it must provide `python3` at version 3.12 or newer,
 since that is what tau runs on inside it. The startup banner names the image in
-use (`• docker python:3.12 · /workspace`), so the container is never a mystery.
+use and both directories, so the container is never a mystery and the host path
+is there to copy into another shell:
+
+```
+  • sandboxed docker python:3.12 · /Users/you/tau → /workspace
+```
+
 In print mode the same fact goes to stderr (`tau: docker python:3.12`) and
 stdout carries only the answer, so `tau -p … | jq` keeps working.
 

@@ -113,6 +113,30 @@ def test_container_reports_the_image_it_was_started_with(monkeypatch):
     assert sandbox.image_name() == "unknown"
 
 
+def test_the_host_directory_travels_into_the_container(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TAU_HOST_DIR", raising=False)
+
+    command = sandbox.docker_command([])
+
+    assert f"--env=TAU_HOST_DIR={tmp_path}" in command
+
+
+def test_host_dir_is_what_the_host_sent(monkeypatch):
+    monkeypatch.setenv("TAU_HOST_DIR", "/Users/someone/tau")
+    assert sandbox.host_dir() == "/Users/someone/tau"
+
+    monkeypatch.delenv("TAU_HOST_DIR")
+    assert sandbox.host_dir() is None
+
+
+def test_the_host_dir_is_not_forwarded_twice(monkeypatch):
+    """`forwarded_env` must not echo it back from a host that had one set."""
+    monkeypatch.setenv("TAU_HOST_DIR", "/stale/path")
+
+    assert "--env=TAU_HOST_DIR=/stale/path" not in sandbox.forwarded_env()
+
+
 def test_hand_off_is_the_default_but_can_be_turned_off(monkeypatch):
     monkeypatch.delenv("TAU_IN_CONTAINER", raising=False)
     monkeypatch.delenv("TAU_DOCKER", raising=False)

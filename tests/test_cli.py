@@ -111,6 +111,35 @@ def test_banner_names_the_container_image(capsys, monkeypatch):
     assert "docker example/image:1" in capsys.readouterr().out
 
 
+def test_banner_names_the_host_directory_that_was_mounted(capsys, monkeypatch):
+    repl = make_repl()
+    repl.session.cwd = "/workspace"
+    monkeypatch.setenv("TAU_IN_CONTAINER", "1")
+    monkeypatch.setenv("TAU_IMAGE", "example/image:1")
+    monkeypatch.setenv("TAU_HOST_DIR", "/Users/someone/tau")
+    monkeypatch.setattr(repl, "_read", lambda prompt: None)
+
+    repl.run()
+
+    out = capsys.readouterr().out
+    assert "/Users/someone/tau → /workspace" in out
+
+
+def test_banner_copes_when_the_host_directory_is_unknown(capsys, monkeypatch):
+    repl = make_repl()
+    repl.session.cwd = "/workspace"
+    monkeypatch.setenv("TAU_IN_CONTAINER", "1")
+    monkeypatch.setenv("TAU_IMAGE", "example/image:1")
+    monkeypatch.delenv("TAU_HOST_DIR", raising=False)
+    monkeypatch.setattr(repl, "_read", lambda prompt: None)
+
+    repl.run()
+
+    out = capsys.readouterr().out
+    assert "/workspace" in out
+    assert "→" not in out
+
+
 def test_banner_stays_quiet_on_the_host(capsys, monkeypatch):
     repl = make_repl()
     monkeypatch.delenv("TAU_IN_CONTAINER", raising=False)

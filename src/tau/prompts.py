@@ -1,11 +1,14 @@
 """System prompt assembly: base instructions plus discovered context files.
 
 tau builds the system prompt from base instructions and context
-files (AGENTS.md) discovered in the working directory and its ancestors, plus
-a user-level AGENTS.md in ~/.agents. When both scopes carry instructions the
-prompt says so instead of merging them: a personal default and a project
-override can disagree, and hiding that would leave the model silently
-following whichever one happened to be concatenated last.
+files (AGENTS.md) in the working directory and in ~/.agents. When both scopes
+carry instructions the prompt says so instead of merging them: a personal
+default and a project override can disagree, and hiding that would leave the
+model silently following whichever one happened to be concatenated last.
+
+The working directory is the only project location read. Ancestors are not
+searched, so a project's instructions apply when tau runs at that project's
+root and are absent when it runs in a subdirectory.
 """
 
 import os
@@ -36,16 +39,9 @@ Working directory: {cwd}
 
 
 def find_context_file(cwd: str | None) -> str | None:
-    """Find AGENTS.md in cwd or the nearest ancestor, like pi."""
-    directory = os.path.abspath(cwd or os.getcwd())
-    while True:
-        candidate = os.path.join(directory, "AGENTS.md")
-        if os.path.isfile(candidate):
-            return candidate
-        parent = os.path.dirname(directory)
-        if parent == directory:
-            return None
-        directory = parent
+    """Find AGENTS.md in cwd, and nowhere else."""
+    candidate = os.path.join(os.path.abspath(cwd or os.getcwd()), "AGENTS.md")
+    return candidate if os.path.isfile(candidate) else None
 
 
 def read_instructions(path: str | None) -> str:

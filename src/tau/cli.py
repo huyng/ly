@@ -20,6 +20,7 @@ from uuid import uuid4
 
 from . import __version__, sandbox
 from .agent import AgentSession
+from .commands import discover
 from .events import (
     AgentEndEvent,
     AgentStartEvent,
@@ -61,6 +62,7 @@ HELP = """\
 /sessions          List recent sessions
 /resume <n>        Resume the n-th session from /sessions
 /compact           Summarize old turns now (automatic near the limit)
+/<name> [args]     Run a command defined in .agents/commands (listed below)
 /quit              Exit (also Ctrl-D)
 """
 
@@ -111,6 +113,7 @@ class Repl:
         self.width = terminal_width()
         self.markdown = True
         self.show_thinking = True
+        self.commands = discover(self.session.cwd)
         self._pastes: dict[str, str] = {}
 
         self.session.subscribe(self._on_event)
@@ -454,6 +457,11 @@ class Repl:
             return True
         if command == "/help":
             print(HELP, end="")
+            if self.commands:
+                print(theme.dim("custom commands:"))
+            for name, custom in sorted(self.commands.items()):
+                label = theme.bold("/" + name)
+                print(f"  {label}{theme.dim(': ' + custom.description)}")
         elif command == "/model":
             if arg:
                 self.session.set_model(arg)
@@ -498,6 +506,8 @@ class Repl:
         elif command == "/compact":
             if not self.session.compact():
                 print(theme.dim("nothing to compact (too few turns, or disabled)"))
+        elif custom := self.commands.get(command.removeprefix("/")):
+            self._submit(custom.expand(arg))
         else:
             print(
                 theme.error(f"unknown command: {command}") + theme.dim(" (try /help)")

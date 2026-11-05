@@ -33,6 +33,31 @@ tau -p "what does this repo do?"   # print mode: run once, write final response
 tau --resume 2                     # resume a previous session
 ```
 
+### Custom slash commands
+
+Drop a Markdown file in `~/.agents/commands/` to define a command for every
+project, or in this directory's `.agents/commands/` to define one for a single
+project. Ancestors are not searched, so a command comes from one of those two
+places and nowhere else. The file name is the command name, so `review.md`
+becomes `/review`, and the file's text is the prompt tau sends:
+
+```markdown
+# Review the pending diff
+
+Review the uncommitted changes with `git diff`. Comment on correctness and
+style. $ARGUMENTS
+```
+
+```bash
+tau> /review be brief
+```
+
+`$ARGUMENTS` is replaced by the text typed after the command name; without
+that placeholder the arguments are appended as a final paragraph. Project
+files win over user files with the same name, and the built-in commands above
+always win. `/help` lists what was found, and files are read when tau starts,
+so restart it after adding one.
+
 ### Sandboxing with Docker
 
 By default, `tau` runs inside a Docker container by forking and re-executing itself as `docker run`, mounting the working directory at `/workspace`, so the tools can only touch the project. Sessions are bind-mounted from the host's `~/.tau/sessions`, and `~/.agents` is mounted read-only.
@@ -88,9 +113,10 @@ A session is tau's record of a conversation. The pieces mirror pi:
   a tree whose active branch supplies model context (pointer lines record the
   active leaf). Assistant messages record `api` (wire format) and `model`.
 - **System prompt** — base instructions plus `AGENTS.md` files: the user's
-  `~/.agents/AGENTS.md` and the nearest one discovered from the working
-  directory upward. When both exist the prompt names both and their
-  precedence, so the model reconciles user and project preferences.
+  `~/.agents/AGENTS.md` and the one in the working directory. Ancestors are
+  not searched, so run tau from the project root to pick up its instructions.
+  When both exist the prompt names both and their precedence, so the model
+  reconciles user and project preferences.
 - **Tools** — `read`, `grep`, `glob`, `bash`, `edit`, `write`, `subagent`, bound
   to the working directory. Tools run with the permissions of the tau process.
 - **Search** — `grep` and `glob` walk the tree in Python (no ripgrep
@@ -178,11 +204,12 @@ The `policy.py` implements some basic gaurds for overtly destructive tool calls 
 src/tau/
 ├── agent.py       # AgentSession: the agent loop
 ├── cli.py         # interactive REPL + print mode; reads TAU_* into the flags
+├── commands.py    # Markdown-defined slash commands (.agents/commands)
 ├── compaction.py  # summarize old turns when the branch gets long
 ├── events.py      # session lifecycle events
 ├── messages.py    # message types (user, assistant, toolResult)
 ├── policy.py      # guard for tool calls (path escapes, obvious accidents)
-├── prompts.py     # system prompt + AGENTS.md discovery
+├── prompts.py     # system prompt + AGENTS.md discovery (cwd and ~/.agents)
 ├── providers/     # model backends
 │   ├── sse.py     # StreamReader: one POST, urllib + SSE, decoded into chunks
 │   ├── backend.py # ModelBackend, both wire formats, and make_backend

@@ -701,6 +701,7 @@ def test_repl_renders_text_and_reasoning_deltas(capsys):
     class StubSession:
         backend = type("B", (), {"provider": type("P", (), {"model": "m"})()})()
         session_manager = type("S", (), {"file": "x"})
+        cwd = None
 
         def subscribe(self, cb):
             return lambda: None

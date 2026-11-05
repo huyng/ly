@@ -52,7 +52,16 @@ def test_both_scopes_are_named(tmp_path, home):
     assert prompt.index("be terse") < prompt.index("run pytest")
 
 
-def test_nearest_ancestor_wins(tmp_path, home):
+def test_ancestor_file_is_ignored(tmp_path, home):
+    write_context(tmp_path / "AGENTS.md", "outer")
+    inner = tmp_path / "service"
+    inner.mkdir()
+    prompt = build_system_prompt(str(inner))
+    assert "outer" not in prompt
+    assert "# Instructions" not in prompt
+
+
+def test_subdirectory_instructions_are_not_mixed_in(tmp_path, home):
     write_context(tmp_path / "AGENTS.md", "outer")
     inner = tmp_path / "service"
     project = write_context(inner / "AGENTS.md", "inner")

@@ -106,14 +106,16 @@ the image's `/root`; anything the `bash` tool sets up via `~` (a `~/.gitconfig`,
 say) therefore lasts only for that container.
 
 ```bash
-tau --no-docker                    # stay on the host (or TAU_DOCKER=0)
+tau --nosandbox                     # stay on the host (or TAU_DOCKER=0)
 export TAU_DOCKER_IMAGE=alpine       # image to use (default python:3.12)
 ```
 
 The default image is `python:3.12`, which carries git, make, gcc and curl, so
 the `bash` tool has the usual build tools. Point `TAU_DOCKER_IMAGE` at another
 image when you need more. The startup banner names the image in use
-(`• docker python:3.12 · /workspace`), so the container is never a mystery.
+(`• docker python:3.12 · /workspace`), so the container is never a mystery. In
+print mode the same fact goes to stderr (`tau: docker python:3.12`) and stdout
+carries only the answer, so `tau -p … | jq` keeps working.
 
 ## How it works
 

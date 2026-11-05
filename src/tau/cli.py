@@ -4,8 +4,8 @@ Modes:
 - interactive (default): stream responses, use slash commands
 - print: `tau -p "prompt"` runs once and writes the final response
 
-Both modes run inside a Docker container by default; `--no-docker` stays on the
-host (see sandbox.py).
+Both modes run inside a Docker container by default; `--nosandbox` stays on
+the host (see sandbox.py).
 """
 
 import argparse
@@ -73,9 +73,9 @@ def _flag(name: str) -> bool | None:
     return raw.strip().lower() not in ("0", "false", "no", "off")
 
 
-def use_container(argv: list[str]) -> bool:
+def use_container(args: argparse.Namespace) -> bool:
     """Return True when this process should hand off to `docker run` first."""
-    if sandbox.in_container() or "--no-docker" in argv:
+    if sandbox.in_container() or args.nosandbox:
         return False
     return _flag("TAU_DOCKER") is not False
 
@@ -504,6 +504,10 @@ def print_mode(args: argparse.Namespace) -> None:
     Deliberately plain: no styling, no tool chatter, no spinners. Failures go
     to stderr with a non-zero exit, so `tau -p` is usable in scripts.
     """
+    # A script cannot see the sandbox from its output, and mistakes here are
+    # silent, so say which one ran. stderr keeps stdout pipeable.
+    if sandbox.in_container():
+        print(f"tau: docker {sandbox.image_name()}", file=sys.stderr, flush=True)
     session = make_session(args)
     failures: list[str] = []
 
@@ -563,7 +567,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--resume", type=int, metavar="N", help="resume the n-th recent session"
     )
     parser.add_argument(
-        "--no-docker",
+        "-ns",
+        "--nosandbox",
         action="store_true",
         help="run on the host instead of inside a Docker container",
     )
@@ -573,9 +578,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if use_container(argv):
-        sandbox.exec_in_docker(argv)
+    # Parse here rather than in the container: `--help`, `--version` and a bad
+    # argument all exit during parsing, so none of them starts a container.
     args = build_parser().parse_args(argv)
+    if use_container(args):
+        sandbox.exec_in_docker(argv)
 
     try:
         if args.print:

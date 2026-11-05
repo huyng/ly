@@ -1,8 +1,10 @@
 """Tests for the REPL's status line: it must show the size of the next request,
 not just the cumulative token totals."""
 
+import pytest
+
 from tau.agent import AgentSession
-from tau.cli import Repl
+from tau.cli import Repl, build_parser
 from tau.compaction import CompactionConfig
 from tau.events import TaskActivityEvent, ToolExecutionEndEvent, ToolExecutionStartEvent
 from tau.messages import (
@@ -117,6 +119,25 @@ def test_banner_stays_quiet_on_the_host(capsys, monkeypatch):
     repl.run()
 
     assert "docker" not in capsys.readouterr().out
+
+
+def test_print_mode_says_it_is_in_docker_on_stderr(monkeypatch, capsys):
+    from tau.cli import print_mode
+
+    monkeypatch.setenv("TAU_IN_CONTAINER", "1")
+    monkeypatch.setenv("TAU_IMAGE", "example/image:1")
+
+    def no_session(_args):
+        raise SystemExit(0)
+
+    monkeypatch.setattr("tau.cli.make_session", no_session)
+
+    with pytest.raises(SystemExit):
+        print_mode(build_parser().parse_args(["-p", "hi"]))
+
+    captured = capsys.readouterr()
+    assert captured.err == "tau: docker example/image:1\n"
+    assert captured.out == ""  # stdout stays clean for pipes
 
 
 def test_env_variables_become_argument_defaults(monkeypatch):

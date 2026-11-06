@@ -397,6 +397,37 @@ def test_reader_wraps_a_socket_timeout(monkeypatch):
     assert caught.value.retryable is True
 
 
+# urllib wraps failures while sending the request, but not while reading the
+# status line: http.client's own exceptions escape `urlopen` unwrapped.
+@pytest.mark.parametrize(
+    "error",
+    [
+        http.client.RemoteDisconnected("Remote end closed connection without response"),
+        TimeoutError("timed out"),
+        ConnectionResetError(104, "Connection reset by peer"),
+    ],
+)
+def test_reader_wraps_a_connection_lost_before_the_response(monkeypatch, error):
+    fake_urlopen(monkeypatch, error=error)
+
+    with pytest.raises(ProviderError) as caught:
+        list(StreamReader("https://x/v1/chat/completions", {}, b"{}").read_chunks())
+
+    assert "no response from" in str(caught.value)
+    assert type(error).__name__ in str(caught.value)
+    assert caught.value.retryable is True
+
+
+def test_reader_keeps_a_hangup_distinct_from_an_unreachable_host(monkeypatch):
+    """A hangup means the host was reached; it must not say 'cannot reach'."""
+    fake_urlopen(monkeypatch, error=http.client.RemoteDisconnected("closed"))
+
+    with pytest.raises(ProviderError) as caught:
+        list(StreamReader("https://x/v1/chat/completions", {}, b"{}").read_chunks())
+
+    assert "cannot reach" not in str(caught.value)
+
+
 def test_reader_does_not_rewrap_its_own_errors(monkeypatch):
     """A malformed-event ProviderError must not be mistaken for a socket fault."""
     fake_urlopen(monkeypatch, FakeResponse(["data: not-json\n"]))
@@ -405,6 +436,7 @@ def test_reader_does_not_rewrap_its_own_errors(monkeypatch):
         list(StreamReader("https://x/v1/chat/completions", {}, b"{}").read_chunks())
 
     assert "malformed stream event" in str(caught.value)
+    assert "no response from" not in str(caught.value)
 
 
 # -- request construction ----------------------------------------------------

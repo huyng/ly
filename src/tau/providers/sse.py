@@ -67,8 +67,15 @@ class StreamReader:
                 err_text, retryable=_is_retryable_status(err.code)
             ) from err
         except urllib.error.URLError as err:
-            # DNS failure, refused connection, TLS problem, read timeout.
+            # DNS failure, refused connection, TLS problem while sending.
+            # Read timeouts do not land here; they arrive as bare socket errors.
             raise ProviderError(f"cannot reach {self.url}: {err.reason}") from err
+        except (http.client.HTTPException, OSError) as err:
+            # The request went out but the reply never started: the server hung
+            # up on a clean FIN (RemoteDisconnected) or never sent a status line
+            # (TimeoutError). urllib only wraps failures while *sending* the
+            # request, so these arrive unwrapped; a fresh request is the remedy.
+            raise ProviderError(f"no response from {self.url}: {err!r}") from err
 
         try:
             with closing(response):

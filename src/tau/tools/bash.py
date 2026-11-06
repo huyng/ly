@@ -14,7 +14,13 @@ DEFAULT_TIMEOUT = 120
 #: Variables a child process never needs, and that must not reach its output.
 #: The harness reads its own provider key from the environment
 #: (``provider.py:211-214``), so an unscrubbed child leaks it with plain `env`.
-_SCRUB = re.compile(r"KEY|TOKEN|SECRET|PASSW|CRED", re.IGNORECASE)
+#: `GIT_CONFIG_*` is exempt: git takes config through those names
+#: (``sandbox.py:127``) and they hold none of our credentials. Scrubbing
+#: `GIT_CONFIG_KEY_0` would leave `GIT_CONFIG_COUNT` without its key, and git
+#: then refuses every command with "missing config key".
+_SCRUB = re.compile(
+    r"^(?!GIT_CONFIG_)\w*(?:KEY|TOKEN|SECRET|PASSW|CRED)", re.IGNORECASE
+)
 
 
 def _child_env() -> dict[str, str]:

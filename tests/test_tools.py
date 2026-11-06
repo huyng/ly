@@ -252,6 +252,23 @@ def test_bash_does_not_leak_env_secrets(bash, monkeypatch):
     assert "FAKE_VISIBLE=ok" in result.output
 
 
+def test_bash_keeps_git_config_env(bash, monkeypatch):
+    """git's env config must survive the secret scrub.
+
+    `GIT_CONFIG_KEY_0` contains "KEY" but is plumbing, not a credential. Losing
+    it leaves `GIT_CONFIG_COUNT=1` without a key, and every git command in the
+    sandbox dies with "missing config key".
+    """
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.directory")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "/workspace")
+
+    result = bash.execute(command="env")
+
+    assert "GIT_CONFIG_KEY_0=safe.directory" in result.output
+    assert "GIT_CONFIG_VALUE_0=/workspace" in result.output
+
+
 def test_bash_survives_non_utf8_output(bash):
     """A latin-1 byte must not throw away the whole result.
 

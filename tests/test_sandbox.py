@@ -50,6 +50,46 @@ def test_command_runs_as_the_host_user_with_a_writable_home(monkeypatch, tmp_pat
     assert not any("/root/" in part for part in command)
 
 
+def test_podman_keeps_the_host_uid_instead_of_passing_one(monkeypatch, tmp_path):
+    """Rootless podman maps container root to us; `--user` asks for a subuid."""
+    monkeypatch.chdir(tmp_path)
+
+    command = sandbox.docker_command([], keep_id=True)
+
+    assert "--userns=keep-id" in command
+    assert "--user" not in command
+    # HOME still has to move: the host home is not mounted.
+    assert f"--env=HOME={sandbox.CONTAINER_HOME}" in command
+
+
+def test_a_podman_version_banner_is_recognised(monkeypatch):
+    class Version:
+        stdout = "Emulate Docker CLI using podman. Create /etc/containers/nodocker"
+        stderr = ""
+
+    monkeypatch.setattr(sandbox.subprocess, "run", lambda *a, **k: Version)
+    assert sandbox.runtime_is_podman() is True
+
+
+@pytest.mark.parametrize("banner", ["Docker version 27.3.1, build ce12230", ""])
+def test_docker_is_not_mistaken_for_podman(monkeypatch, banner):
+    class Version:
+        stdout = banner
+        stderr = ""
+
+    monkeypatch.setattr(sandbox.subprocess, "run", lambda *a, **k: Version)
+    assert sandbox.runtime_is_podman() is False
+
+
+def test_a_missing_docker_does_not_crash_the_probe(monkeypatch):
+    def missing(*_args, **_kwargs):
+        raise FileNotFoundError(2, "No such file or directory", "docker")
+
+    monkeypatch.setattr(sandbox.subprocess, "run", missing)
+
+    assert sandbox.runtime_is_podman() is False
+
+
 def test_command_drops_capabilities_and_forbids_new_privileges(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
@@ -174,3 +214,67 @@ def test_a_real_run_hands_the_whole_command_line_to_docker(monkeypatch):
         main(["-p", "hello"])
 
     assert handed_off == [["-p", "hello"]]
+
+
+# -- the sessions directory the container mounts -----------------------------
+
+
+def test_a_sessions_directory_that_cannot_be_created_says_so(monkeypatch, tmp_path):
+    """The user owns this path, so a refusal is the machine, not a fixable setup."""
+    sessions = tmp_path / "sessions"
+    monkeypatch.setattr(sandbox, "SESSIONS_DIR", sessions)
+    monkeypatch.setattr(sandbox.os, "execvp", _must_not_run)
+
+    def refuse(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied", str(sessions))
+
+    monkeypatch.setattr(sandbox.Path, "mkdir", refuse)
+
+    with pytest.raises(SystemExit) as exited:
+        sandbox.exec_in_docker([])
+
+    message = str(exited.value)
+    assert str(sessions) in message
+    assert "Permission denied" in message
+    # No guess at a cause: the directory is ours to make.
+    assert "chown" not in message
+
+
+def test_a_writable_sessions_directory_hands_off(monkeypatch, tmp_path):
+    sessions = tmp_path / "sessions"
+    monkeypatch.setattr(sandbox, "SESSIONS_DIR", sessions)
+    # Never probe the host's docker from a test: it may not exist, and the
+    # answer must not change what this test asserts.
+    monkeypatch.setattr(sandbox, "runtime_is_podman", lambda: False)
+    handed_off: list[list[str]] = []
+
+    def record(command: list[str]) -> None:
+        handed_off.append(command)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(sandbox.os, "execvp", lambda name, command: record(command))
+
+    with pytest.raises(SystemExit):
+        sandbox.exec_in_docker(["-p", "hello"])
+
+    assert sessions.is_dir()  # created for the bind mount
+    assert handed_off[0][0] == "docker"
+
+
+def test_the_hand_off_asks_podman_to_keep_the_host_uid(monkeypatch, tmp_path):
+    """Regression: a fresh machine on rootless podman could not write /sessions."""
+    monkeypatch.setattr(sandbox, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(sandbox, "runtime_is_podman", lambda: True)
+    handed_off: list[list[str]] = []
+
+    def record(command: list[str]) -> None:
+        handed_off.append(command)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(sandbox.os, "execvp", lambda name, command: record(command))
+
+    with pytest.raises(SystemExit):
+        sandbox.exec_in_docker([])
+
+    assert "--userns=keep-id" in handed_off[0]
+    assert "--user" not in handed_off[0]

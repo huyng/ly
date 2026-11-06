@@ -7,6 +7,7 @@ project and little else of the host.
 """
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -71,11 +72,31 @@ def forwarded_env() -> list[str]:
     return [f"--env={name}={os.environ[name]}" for name in names]
 
 
-def docker_command(argv: list[str]) -> list[str]:
+def runtime_is_podman() -> bool:
+    """Whether `docker` on PATH is podman's emulation shim.
+
+    Returns:
+        True when `docker --version` names podman, False for real Docker or
+        when the command cannot be run at all. The hand-off reports a missing
+        docker itself, so a failed probe is not an error here.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "--version"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "podman" in (result.stdout + result.stderr).lower()
+
+
+def docker_command(argv: list[str], *, keep_id: bool = False) -> list[str]:
     """Build the `docker run` command that re-runs tau inside a container.
 
     Args:
         argv: The host command line, forwarded verbatim after the image name.
+        keep_id: Map the container process to this uid instead of passing an
+            explicit `--user`. Needed for podman, whose user namespace maps
+            container root to the host user and everything else to a subuid.
 
     Returns:
         A ready-to-exec argv list starting with `docker`.
@@ -89,11 +110,13 @@ def docker_command(argv: list[str]) -> list[str]:
     command += ["--workdir", WORKSPACE]
     # Run as the host user, or a Linux host finds the project files owned by
     # root afterwards. HOME moves off /root, which that uid cannot write.
-    command += [
-        "--user",
-        f"{os.getuid()}:{os.getgid()}",
-        f"--env=HOME={CONTAINER_HOME}",
-    ]
+    if keep_id:
+        # podman's namespace already maps our uid onto the container, so mounts
+        # show up owned by us; `--user` would ask for a subuid that owns nothing.
+        command += ["--userns=keep-id"]
+    else:
+        command += ["--user", f"{os.getuid()}:{os.getgid()}"]
+    command += [f"--env=HOME={CONTAINER_HOME}"]
     # Nothing inside needs a capability, and a setuid binary must not let one
     # back in. Both are no-ops for normal tooling and shrink the kernel surface.
     command += ["--cap-drop=ALL", "--security-opt=no-new-privileges"]
@@ -106,7 +129,11 @@ def docker_command(argv: list[str]) -> list[str]:
         f"--env=GIT_CONFIG_VALUE_0={WORKSPACE}",
     ]
     # Sessions sit outside the project so /resume still finds them next run.
-    command += ["-v", f"{SESSIONS_DIR}:/sessions", "--env=TAU_SESSIONS_DIR=/sessions"]
+    command += [
+        "-v",
+        f"{SESSIONS_DIR}:/sessions",
+        "--env=TAU_SESSIONS_DIR=/sessions",
+    ]
     # Personal instructions, or the system prompt quietly loses them. They
     # belong under HOME, because that is where the container-side tau looks.
     user_agents = Path.home() / ".agents"
@@ -131,10 +158,16 @@ def exec_in_docker(argv: list[str]) -> None:
         argv: The host command line, forwarded verbatim.
 
     Raises:
-        SystemExit: docker is not installed on the host.
+        SystemExit: docker is not installed, or the session directory cannot
+            be created.
     """
-    Path(SESSIONS_DIR).mkdir(parents=True, exist_ok=True)
-    command = docker_command(argv)
+    try:
+        Path(SESSIONS_DIR).mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # Nothing here diagnoses why: this directory is ours to create, so a
+        # refusal means the filesystem or $HOME is in a state we cannot guess.
+        raise SystemExit(f"tau: cannot create {SESSIONS_DIR}: {exc}") from exc
+    command = docker_command(argv, keep_id=runtime_is_podman())
     try:
         os.execvp(command[0], command)
     except FileNotFoundError:

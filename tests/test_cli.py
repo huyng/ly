@@ -210,3 +210,27 @@ def test_pass_reasoning_content_env_flag_is_tri_state(monkeypatch):
 
     monkeypatch.setenv("TAU_PASS_REASONING_CONTENT", "off")
     assert _flag("TAU_PASS_REASONING_CONTENT") is False
+
+
+def test_a_sessions_directory_that_cannot_be_written_is_explained(monkeypatch):
+    """The traceback would be about os.mkdir; name the directory instead."""
+    from tau.cli import main
+    from tau.session import SessionManager
+
+    monkeypatch.setenv("TAU_IN_CONTAINER", "1")
+    monkeypatch.setenv("TAU_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("TAU_API_KEY", "test")
+
+    def refuse(self):
+        raise PermissionError(13, "Permission denied", "/sessions/2026-11-06")
+
+    monkeypatch.setattr(SessionManager, "new_session", refuse)
+
+    with pytest.raises(SystemExit) as exited:
+        main([])
+
+    message = str(exited.value)
+    assert "cannot save sessions" in message
+    assert "Permission denied" in message
+    # Nothing is guessed about why: this path is ours to create.
+    assert "chown" not in message

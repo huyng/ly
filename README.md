@@ -66,6 +66,8 @@ The container runs as your host uid/gid, so files it writes into the project
 belong to you. Its `HOME` moves to `/tmp`, because a non-root uid cannot write
 the image's `/root`; anything the `bash` tool sets up via `~` (a `~/.gitconfig`, say) therefore lasts only for that container.
 
+podman works too, including rootless podman behind the `docker` shim.
+
 ```bash
 export TAU_DOCKER_IMAGE=python:3.12       # image to use (default python:3.12)
 tau

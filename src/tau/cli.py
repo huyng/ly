@@ -46,7 +46,7 @@ from .render import (
     render_tool_result,
     summarize_tool_call,
 )
-from .session import SessionManager
+from .session import SESSIONS_DIR, SessionManager
 from .spinner import Spinner
 from .theme import DIM, Theme, get_theme, terminal_width
 from .tools import default_tools
@@ -611,6 +611,10 @@ def main(argv: list[str] | None = None) -> None:
         session = make_session(args)
     except MissingCredentialsError as exc:
         sys.exit(str(exc))
+    except OSError as exc:
+        # The sessions directory is the only thing startup writes. Nothing here
+        # says why it failed: a refusal is the machine's state, not tau's.
+        sys.exit(f"tau: cannot save sessions in {SESSIONS_DIR}: {exc}")
 
     repl = Repl(session)
     if args.prompt:

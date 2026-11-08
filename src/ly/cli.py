@@ -369,7 +369,9 @@ class Repl:
 
         print(row(" "))  # one empty band row above the text
         for line in text.splitlines():
-            for line_no, part in enumerate(textwrap.wrap(line, width - len(glyph) - 1) or [""]):
+            for line_no, part in enumerate(
+                textwrap.wrap(line, width - len(glyph) - 1) or [""]
+            ):
                 if line_no == 0:
                     print(row(f"{glyph}{part}"))
                 else:

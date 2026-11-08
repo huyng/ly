@@ -15,11 +15,9 @@ from pathlib import Path
 
 from .messages import AgentMessage, deserialize_message, new_id, serialize_message
 
-SESSIONS_DIR = Path(
-    os.environ.get("TAU_SESSIONS_DIR", Path.home() / ".tau" / "sessions")
-)
+SESSIONS_DIR = Path(os.environ.get("LY_SESSIONS_DIR", Path.home() / ".ly" / "sessions"))
 
-# The sessions directory is shared with other tools (notably the full tau CLI),
+# The sessions directory is shared with other tools (notably the full ly CLI),
 # which lay their sessions out as `<cwd-slug>-<hash>/<uuid4>.jsonl` alongside an
 # `index.jsonl`. Only files this module itself writes are ours: a 12-hex id in a
 # YYYY-MM-DD directory. Anything else uses a different entry schema and would

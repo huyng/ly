@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-from tau.cli import Repl
+from ly.cli import Repl
 
 
 def test_piped_input_stays_line_oriented(monkeypatch):
@@ -43,7 +43,7 @@ def test_gnu_readline_enables_bracketed_paste(monkeypatch):
 def test_prompt_color_does_not_count_as_visible_columns(monkeypatch, backend, expected):
     import readline
 
-    from tau.theme import Theme
+    from ly.theme import Theme
 
     prompts = []
 
@@ -63,8 +63,8 @@ def test_prompt_color_does_not_count_as_visible_columns(monkeypatch, backend, ex
 def test_terminal_ctrl_a_and_ctrl_e_with_colored_prompt():
     code = """
 import json
-from tau.cli import Repl
-from tau.theme import Theme
+from ly.cli import Repl
+from ly.theme import Theme
 repl = Repl.__new__(Repl)
 repl._pastes = {}
 text = repl._read(Theme(enabled=True).accent('» '))
@@ -108,7 +108,7 @@ def test_terminal_paste_waits_for_enter(cancel):
     # no sleep or assumptions about input delivery speed are needed.
     code = """
 import json
-from tau.cli import Repl
+from ly.cli import Repl
 repl = Repl.__new__(Repl)
 repl._pastes = {}
 try:

@@ -1,6 +1,6 @@
 """Hand the CLI off to a Docker container instead of running on the host.
 
-`tau` re-executes itself at startup: the host process becomes a `docker run`
+`ly` re-executes itself at startup: the host process becomes a `docker run`
 client, and the agent loop, the tools and the session files all live inside the
 container. The working directory is mounted at /workspace, so the tools see the
 project and little else of the host.
@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import tau
+import ly
 
 from .session import SESSIONS_DIR
 
@@ -24,24 +24,24 @@ CONTAINER_HOME = "/tmp"
 #: Variables this process sets or consumes itself; forwarding them would loop.
 NOT_FORWARDED = frozenset(
     {
-        "TAU_IN_CONTAINER",
-        "TAU_DOCKER",
-        "TAU_DOCKER_IMAGE",
-        "TAU_HOST_DIR",
-        "TAU_IMAGE",
-        "TAU_SESSIONS_DIR",
+        "LY_IN_CONTAINER",
+        "LY_DOCKER",
+        "LY_DOCKER_IMAGE",
+        "LY_HOST_DIR",
+        "LY_IMAGE",
+        "LY_SESSIONS_DIR",
     }
 )
 
 
 def in_container() -> bool:
-    """Return True when this is the copy of tau running inside the container."""
-    return os.environ.get("TAU_IN_CONTAINER") == "1"
+    """Return True when this is the copy of ly running inside the container."""
+    return os.environ.get("LY_IN_CONTAINER") == "1"
 
 
 def image_name() -> str:
     """The image this container was started from, as the host named it."""
-    return os.environ.get("TAU_IMAGE") or "unknown"
+    return os.environ.get("LY_IMAGE") or "unknown"
 
 
 def host_dir() -> str | None:
@@ -51,20 +51,20 @@ def host_dir() -> str | None:
         The host path, or None when this is not a container (where the
         workspace already is the host directory) or the host did not say.
     """
-    return os.environ.get("TAU_HOST_DIR")
+    return os.environ.get("LY_HOST_DIR")
 
 
 def forwarded_env() -> list[str]:
-    """Build `--env` flags for the host variables the container-side tau reads.
+    """Build `--env` flags for the host variables the container-side ly reads.
 
     Returns:
-        `--env=NAME=value` arguments for every `TAU_*` variable the host set,
+        `--env=NAME=value` arguments for every `LY_*` variable the host set,
         plus the terminal variables that decide colour and readline behaviour.
     """
     names = [
         name
         for name in os.environ
-        if name.startswith("TAU_") and name not in NOT_FORWARDED
+        if name.startswith("LY_") and name not in NOT_FORWARDED
     ]
     names += [
         name for name in ("TERM", "NO_COLOR", "FORCE_COLOR") if name in os.environ
@@ -90,7 +90,7 @@ def runtime_is_podman() -> bool:
 
 
 def docker_command(argv: list[str], *, keep_id: bool = False) -> list[str]:
-    """Build the `docker run` command that re-runs tau inside a container.
+    """Build the `docker run` command that re-runs ly inside a container.
 
     Args:
         argv: The host command line, forwarded verbatim after the image name.
@@ -101,7 +101,7 @@ def docker_command(argv: list[str], *, keep_id: bool = False) -> list[str]:
     Returns:
         A ready-to-exec argv list starting with `docker`.
     """
-    image = os.environ.get("TAU_DOCKER_IMAGE") or DEFAULT_IMAGE
+    image = os.environ.get("LY_DOCKER_IMAGE") or DEFAULT_IMAGE
     command = ["docker", "run", "--rm", "-i"]
     # The REPL wants a tty, but docker refuses -t when it has none.
     if sys.stdin.isatty() and sys.stdout.isatty():
@@ -132,27 +132,27 @@ def docker_command(argv: list[str], *, keep_id: bool = False) -> list[str]:
     command += [
         "-v",
         f"{SESSIONS_DIR}:/sessions",
-        "--env=TAU_SESSIONS_DIR=/sessions",
+        "--env=LY_SESSIONS_DIR=/sessions",
     ]
     # Personal instructions, or the system prompt quietly loses them. They
-    # belong under HOME, because that is where the container-side tau looks.
+    # belong under HOME, because that is where the container-side ly looks.
     user_agents = Path.home() / ".agents"
     if user_agents.is_dir():
         command += ["-v", f"{user_agents}:{CONTAINER_HOME}/.agents:ro"]
-    # Run the tau that is on the host, not a copy baked into an image.
-    package = Path(tau.__file__).parent
-    command += ["-v", f"{package}:/opt/tau/tau:ro", "--env=PYTHONPATH=/opt/tau"]
+    # Run the ly that is on the host, not a copy baked into an image.
+    package = Path(ly.__file__).parent
+    command += ["-v", f"{package}:/opt/ly/ly:ro", "--env=PYTHONPATH=/opt/ly"]
     command += forwarded_env()
     # The container sees /workspace; only this tells the banner which host
     # directory that is, and the banner is how the mount is made visible.
-    command += [f"--env=TAU_HOST_DIR={Path.cwd()}"]
-    command += ["--env=TAU_IN_CONTAINER=1", f"--env=TAU_IMAGE={image}", image]
-    command += ["python3", "-P", "-m", "tau"]
+    command += [f"--env=LY_HOST_DIR={Path.cwd()}"]
+    command += ["--env=LY_IN_CONTAINER=1", f"--env=LY_IMAGE={image}", image]
+    command += ["python3", "-P", "-m", "ly"]
     return command + list(argv)
 
 
 def exec_in_docker(argv: list[str]) -> None:
-    """Replace this process with `docker run` running tau in the container.
+    """Replace this process with `docker run` running ly in the container.
 
     Args:
         argv: The host command line, forwarded verbatim.
@@ -166,11 +166,11 @@ def exec_in_docker(argv: list[str]) -> None:
     except OSError as exc:
         # Nothing here diagnoses why: this directory is ours to create, so a
         # refusal means the filesystem or $HOME is in a state we cannot guess.
-        raise SystemExit(f"tau: cannot create {SESSIONS_DIR}: {exc}") from exc
+        raise SystemExit(f"ly: cannot create {SESSIONS_DIR}: {exc}") from exc
     command = docker_command(argv, keep_id=runtime_is_podman())
     try:
         os.execvp(command[0], command)
     except FileNotFoundError:
         raise SystemExit(
-            "tau: docker not found; install Docker or run with --nosandbox"
+            "ly: docker not found; install Docker or run with --nosandbox"
         ) from None

@@ -8,10 +8,10 @@ import time
 
 import pytest
 
-from tau.tools.bash import MAX_OUTPUT_BYTES, MAX_OUTPUT_LINES, BashTool
-from tau.tools.edit import MAX_DIFF_LINES, EditTool, WriteTool
-from tau.tools.read import MAX_LINES, ReadTool
-from tau.tools.validation import validate_arguments
+from ly.tools.bash import MAX_OUTPUT_BYTES, MAX_OUTPUT_LINES, BashTool
+from ly.tools.edit import MAX_DIFF_LINES, EditTool, WriteTool
+from ly.tools.read import MAX_LINES, ReadTool
+from ly.tools.validation import validate_arguments
 
 
 @pytest.fixture
@@ -341,7 +341,7 @@ def test_bash_timeout_kills_the_whole_process_group(bash, tmp_path):
 #: Ctrl-C does, from inside `execute`'s blocking wait.
 _INTERRUPTED = """
 import signal
-from tau.tools.bash import BashTool
+from ly.tools.bash import BashTool
 
 def interrupt(*_):
     raise KeyboardInterrupt

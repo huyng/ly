@@ -1,4 +1,4 @@
-"""Every wire format tau can speak, from the transport up.
+"""Every wire format ly can speak, from the transport up.
 
 All backends share one contract: `stream_response` takes the transcript, yields events,
 and returns the AssistantMessage. What to talk to — model, endpoint, key,
@@ -74,7 +74,7 @@ class ModelBackend:
 
 # -- chat-completions ---------------------------------------------------------
 
-# OpenAI's documented reasons, plus the DeepSeek-specific failures tau has seen.
+# OpenAI's documented reasons, plus the DeepSeek-specific failures ly has seen.
 _STOP_REASONS = {
     "tool_calls": "toolUse",
     "length": "length",
@@ -387,7 +387,7 @@ class ResponsesBackend(ModelBackend):
             "instructions": system_prompt,
             "input": self._input_items(messages),
             "stream": True,
-            # tau owns the transcript, so nothing needs keeping server-side.
+            # ly owns the transcript, so nothing needs keeping server-side.
             "store": False,
             # Request summaries so reasoning text appears on the stream.
             "reasoning": {"summary": "auto"},
@@ -561,7 +561,7 @@ class ResponsesBackend(ModelBackend):
 def _reasoning_item(
     chunk: Mapping[str, Any], previous: dict[str, Any] | None
 ) -> dict[str, Any]:
-    """Refresh the reasoning item tau will replay on the next request.
+    """Refresh the reasoning item ly will replay on the next request.
 
     The item arrives across two events, so each field is taken from whichever
     event carries it: the blob may come on `added`, while only `done` is

@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from tau.agent import AgentSession
-from tau.compaction import (
+from ly.agent import AgentSession
+from ly.compaction import (
     SUMMARY_PREFIX,
     SUMMARY_SYSTEM_PROMPT,
     CompactionConfig,
@@ -15,13 +15,13 @@ from tau.compaction import (
     split_index,
     summarize,
 )
-from tau.events import (
+from ly.events import (
     CompactionEndEvent,
     CompactionStartEvent,
     ErrorEvent,
     TextDeltaEvent,
 )
-from tau.messages import (
+from ly.messages import (
     AgentMessage,
     AssistantMessage,
     TextContent,
@@ -30,9 +30,9 @@ from tau.messages import (
     Usage,
     UserMessage,
 )
-from tau.providers import Provider, ProviderError
-from tau.providers.backend import ModelBackend
-from tau.session import SessionManager
+from ly.providers import Provider, ProviderError
+from ly.providers.backend import ModelBackend
+from ly.session import SessionManager
 
 
 class ScriptedBackend(ModelBackend):
@@ -365,7 +365,7 @@ def test_cancellation_before_branch_update_preserves_history(monkeypatch):
         session.abort()
         return "SUM"
 
-    monkeypatch.setattr("tau.agent.summarize", cancelled_summary)
+    monkeypatch.setattr("ly.agent.summarize", cancelled_summary)
 
     assert session.compact() is False
     assert manager.entries == entries

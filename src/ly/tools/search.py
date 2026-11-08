@@ -1,6 +1,6 @@
 """Search tools: `grep` for file contents and `glob` for file paths.
 
-Both walk the tree in plain Python, so tau needs no ripgrep dependency. Two
+Both walk the tree in plain Python, so ly needs no ripgrep dependency. Two
 properties matter more than raw speed:
 
 - **Bounded output.** A broad query must never flood the transcript. Every

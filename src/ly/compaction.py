@@ -1,7 +1,7 @@
 """Context compaction: summarize old turns when the branch grows too long.
 
 A long-running session eventually outgrows the model's context window. Instead
-of failing at that point, tau summarizes the oldest turns into a single
+of failing at that point, ly summarizes the oldest turns into a single
 message once the active branch crosses a token threshold, and keeps the most
 recent turns verbatim.
 
@@ -101,13 +101,13 @@ class CompactionConfig:
 
     @classmethod
     def from_env(cls) -> "CompactionConfig":
-        """Config from TAU_COMPACT* environment variables, with defaults."""
+        """Config from LY_COMPACT* environment variables, with defaults."""
         return cls(
-            enabled=_env_bool("TAU_COMPACT", True),
-            threshold_tokens=_env_int("TAU_COMPACT_THRESHOLD", cls.threshold_tokens),
-            keep_turns=_env_int("TAU_COMPACT_KEEP_TURNS", cls.keep_turns),
+            enabled=_env_bool("LY_COMPACT", True),
+            threshold_tokens=_env_int("LY_COMPACT_THRESHOLD", cls.threshold_tokens),
+            keep_turns=_env_int("LY_COMPACT_KEEP_TURNS", cls.keep_turns),
             max_summary_input_tokens=_env_int(
-                "TAU_COMPACT_INPUT_TOKENS", cls.max_summary_input_tokens
+                "LY_COMPACT_INPUT_TOKENS", cls.max_summary_input_tokens
             ),
         )
 

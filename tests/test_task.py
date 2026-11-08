@@ -4,25 +4,25 @@ from typing import Any
 
 import pytest
 
-from tau.agent import AgentSession
-from tau.events import (
+from ly.agent import AgentSession
+from ly.events import (
     TaskActivityEvent,
     TextDeltaEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
-from tau.messages import (
+from ly.messages import (
     AssistantMessage,
     TextContent,
     ToolCall,
     ToolResultMessage,
     Usage,
 )
-from tau.providers import Provider
-from tau.providers.backend import ModelBackend
-from tau.session import SessionManager
-from tau.tools import default_tools
-from tau.tools.task import SubAgentTool
+from ly.providers import Provider
+from ly.providers.backend import ModelBackend
+from ly.session import SessionManager
+from ly.tools import default_tools
+from ly.tools.task import SubAgentTool
 
 
 class ScriptedBackend(ModelBackend):
@@ -244,7 +244,7 @@ def test_task_requires_a_prompt(workspace):
 
 
 def test_tool_schema_only_requires_prompt(workspace):
-    from tau.tools.validation import validate_arguments
+    from ly.tools.validation import validate_arguments
 
     tool = SubAgentTool(cwd=str(workspace))
     assert validate_arguments(tool.parameters, {"prompt": "x"}) == []
@@ -252,7 +252,7 @@ def test_tool_schema_only_requires_prompt(workspace):
 
 
 def test_subagent_provider_error_is_a_tool_error(workspace, monkeypatch):
-    monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
+    monkeypatch.setattr("ly.agent.RETRY_DELAYS", (0, 0, 0))
     # The sub-agent's turn retries MAX_RETRIES times before giving up.
     session, _ = make_session(
         workspace,

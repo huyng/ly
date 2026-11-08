@@ -1,8 +1,8 @@
-"""tau: a minimal Python coding agent harness, modeled after pi.
+"""ly: a minimal Python coding agent harness, modeled after pi.
 
 Exposes an SDK-style factory, mirroring pi's `createAgentSession()`:
 
-    from tau import create_agent_session
+    from ly import create_agent_session
 
     session = create_agent_session()
     session.prompt("What files are in the current directory?")

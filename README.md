@@ -1,10 +1,10 @@
-# τ tau
+# ly
 
 A minimal, extensible AI coding agent for the terminal, written in Python and modeled after [pi](https://pi.dev). It transparently runs sandboxed inside Docker by default.
 
-When you run `tau` it automatically forks and launches itself inside a docker container mounted with your current working directory.
+When you run `ly` it automatically forks and launches itself inside a docker container mounted with your current working directory.
 
-tau replicates pi's core architecture — the agent loop, streaming events,
+ly replicates pi's core architecture — the agent loop, streaming events,
 session persistence, tool execution, and context-file discovery — in roughly
 3000 lines of dependency-free Python code.
 
@@ -13,24 +13,24 @@ session persistence, tool execution, and context-file discovery — in roughly
 Requires Python 3.12+. There are no runtime dependencies — installation pulls nothing beyond the standard library.
 
 ```bash
-uv tool install git+https://github.com/huyng/tau
+uv tool install git+https://github.com/huyng/ly
 ```
 
-Point tau to an LLM provider by setting environment variables. It is compatible with any OpenAI-API compatible endpoint.
+Point ly to an LLM provider by setting environment variables. It is compatible with any OpenAI-API compatible endpoint.
 
 ```bash
-export TAU_API_KEY=sk-              # API key for the selected provider
-export TAU_MODEL=gpt-4.1            # The model you would like to use
-export TAU_BASE_URL=
+export LY_API_KEY=sk-             # API key for the selected provider
+export LY_MODEL=gpt-4.1           # The model you would like to use
+export LY_BASE_URL=
 ```
 
 ## Use
 
 ```bash
-tau                                # interactive REPL in the current directory
-tau "fix the failing tests"        # start with an initial prompt
-tau -p "what does this repo do?"   # print mode: run once, write final response
-tau --resume 2                     # resume a previous session
+ly                                # interactive REPL in the current directory
+ly "fix the failing tests"        # start with an initial prompt
+ly -p "what does this repo do?"   # print mode: run once, write final response
+ly --resume 2                     # resume a previous session
 ```
 
 ### Custom slash commands
@@ -39,7 +39,7 @@ Drop a Markdown file in `~/.agents/commands/` to define a command for every
 project, or in this directory's `.agents/commands/` to define one for a single
 project. Ancestors are not searched, so a command comes from one of those two
 places and nowhere else. The file name is the command name, so `review.md`
-becomes `/review`, and the file's text is the prompt tau sends:
+becomes `/review`, and the file's text is the prompt ly sends:
 
 ```markdown
 # Review the pending diff
@@ -49,18 +49,18 @@ style. $ARGUMENTS
 ```
 
 ```bash
-tau> /review be brief
+ly> /review be brief
 ```
 
 `$ARGUMENTS` is replaced by the text typed after the command name; without
 that placeholder the arguments are appended as a final paragraph. Project
 files win over user files with the same name, and the built-in commands above
-always win. `/help` lists what was found, and files are read when tau starts,
+always win. `/help` lists what was found, and files are read when ly starts,
 so restart it after adding one.
 
 ### Sandboxing with Docker
 
-By default, `tau` runs inside a Docker container by forking and re-executing itself as `docker run`, mounting the working directory at `/workspace`, so the tools can only touch the project. Sessions are bind-mounted from the host's `~/.tau/sessions`, and `~/.agents` is mounted read-only.
+By default, `ly` runs inside a Docker container by forking and re-executing itself as `docker run`, mounting the working directory at `/workspace`, so the tools can only touch the project. Sessions are bind-mounted from the host's `~/.ly/sessions`, and `~/.agents` is mounted read-only.
 
 The container runs as your host uid/gid, so files it writes into the project
 belong to you. Its `HOME` moves to `/tmp`, because a non-root uid cannot write
@@ -69,38 +69,38 @@ the image's `/root`; anything the `bash` tool sets up via `~` (a `~/.gitconfig`,
 podman works too, including rootless podman behind the `docker` shim.
 
 ```bash
-export TAU_DOCKER_IMAGE=python:3.12       # image to use (default python:3.12)
-tau
+export LY_DOCKER_IMAGE=python:3.12       # image to use (default python:3.12)
+ly
 ```
 
 The default image is `python:3.12`, which carries git, make, gcc and curl, so
-the `bash` tool has the usual build tools. Point `TAU_DOCKER_IMAGE` at another
+the `bash` tool has the usual build tools. Point `LY_DOCKER_IMAGE` at another
 image when you need more; it must provide `python3` at version 3.12 or newer,
-since that is what tau runs on inside it. The startup banner names the image in
+since that is what ly runs on inside it. The startup banner names the image in
 use and both directories, so the container is never a mystery and the host path
 is there to copy into another shell:
 
 ```
-  • sandboxed docker python:3.12 · /Users/you/tau → /workspace
+  • sandboxed docker python:3.12 · /Users/you/ly → /workspace
 ```
 
-In print mode the same fact goes to stderr (`tau: docker python:3.12`) and
-stdout carries only the answer, so `tau -p … | jq` keeps working.
+In print mode the same fact goes to stderr (`ly: docker python:3.12`) and
+stdout carries only the answer, so `ly -p … | jq` keeps working.
 
-You can run tau without a sandbox with the `--nosandbox` flag.
+You can run ly without a sandbox with the `--nosandbox` flag.
 
 ```bash
-tau --nosandbox     # stay on the host (or TAU_DOCKER=0)
+ly --nosandbox     # stay on the host (or LY_DOCKER=0)
 ```
 
 ## How it works
 
-A session is tau's record of a conversation. The pieces mirror pi:
+A session is ly's record of a conversation. The pieces mirror pi:
 
-- **Agent loop** — a submitted message is added to the active branch; tau
+- **Agent loop** — a submitted message is added to the active branch; ly
   builds a model request from the system prompt, active branch, and tool
   definitions; the provider streams an assistant response containing text
-  and/or tool calls; tau executes each tool call and records the results.
+  and/or tool calls; ly executes each tool call and records the results.
   Tool results trigger another turn; otherwise the run ends.
 - **Backend** — one request per turn — `chat/completions` by default, or
   `/v1/responses` for models that refuse tools on chat-completions — streamed over
@@ -110,17 +110,17 @@ A session is tau's record of a conversation. The pieces mirror pi:
   and tool-call deltas accumulate into the finished message.
 - **Events** — subscribe with `session.subscribe(callback)` to observe
   message start/end, text deltas, tool execution, and run lifecycle.
-- **Sessions** — append-only JSONL under `~/.tau/sessions/<date>/` (override
-  with `TAU_SESSIONS_DIR`). Each entry has an id and a parent, so history forms
+- **Sessions** — append-only JSONL under `~/.ly/sessions/<date>/` (override
+  with `LY_SESSIONS_DIR`). Each entry has an id and a parent, so history forms
   a tree whose active branch supplies model context (pointer lines record the
   active leaf). Assistant messages record `api` (wire format) and `model`.
 - **System prompt** — base instructions plus `AGENTS.md` files: the user's
   `~/.agents/AGENTS.md` and the one in the working directory. Ancestors are
-  not searched, so run tau from the project root to pick up its instructions.
+  not searched, so run ly from the project root to pick up its instructions.
   When both exist the prompt names both and their precedence, so the model
   reconciles user and project preferences.
 - **Tools** — `read`, `grep`, `glob`, `bash`, `edit`, `write`, `subagent`, bound
-  to the working directory. Tools run with the permissions of the tau process.
+  to the working directory. Tools run with the permissions of the ly process.
 - **Search** — `grep` and `glob` walk the tree in Python (no ripgrep
   dependency), prune `.git`, `node_modules`, `.venv`, `__pycache__` and build
   output, skip binaries, and cap their output, so a broad query cannot flood
@@ -146,10 +146,10 @@ suit a ~200k-token context window:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `TAU_COMPACT` | `1` | Set to `0` to disable automatic compaction |
-| `TAU_COMPACT_THRESHOLD` | `100000` | Estimated tokens in the branch that trigger it |
-| `TAU_COMPACT_KEEP_TURNS` | `4` | Recent user turns kept verbatim |
-| `TAU_COMPACT_INPUT_TOKENS` | `30000` | Cap per summarization request (longer histories are folded in batches) |
+| `LY_COMPACT` | `1` | Set to `0` to disable automatic compaction |
+| `LY_COMPACT_THRESHOLD` | `100000` | Estimated tokens in the branch that trigger it |
+| `LY_COMPACT_KEEP_TURNS` | `4` | Recent user turns kept verbatim |
+| `LY_COMPACT_INPUT_TOKENS` | `30000` | Cap per summarization request (longer histories are folded in batches) |
 
 Lower the threshold when running a smaller-context model. Compaction is
 conservative: if the summary would not be smaller than the turns it replaces
@@ -159,11 +159,11 @@ history is left untouched, and the run continues.
 
 ## SDK usage
 
-The SDK takes its configuration as arguments; only the `tau` command reads the
-`TAU_*` environment variables.
+The SDK takes its configuration as arguments; only the `ly` command reads the
+`LY_*` environment variables.
 
 ```python
-from tau import create_agent_session
+from ly import create_agent_session
 
 def handler(event):
     print(event.get("delta", ""), end="")
@@ -184,7 +184,7 @@ session.dispose()
 Custom tools implement the `Tool` interface:
 
 ```python
-from tau.tools import Tool, ToolResult
+from ly.tools import Tool, ToolResult
 
 class GitStatusTool(Tool):
     name = "git_status"
@@ -203,9 +203,9 @@ The `policy.py` implements some basic gaurds for overtly destructive tool calls 
 ## Layout
 
 ```
-src/tau/
+src/ly/
 ├── agent.py       # AgentSession: the agent loop
-├── cli.py         # interactive REPL + print mode; reads TAU_* into the flags
+├── cli.py         # interactive REPL + print mode; reads LY_* into the flags
 ├── commands.py    # Markdown-defined slash commands (.agents/commands)
 ├── compaction.py  # summarize old turns when the branch gets long
 ├── events.py      # session lifecycle events

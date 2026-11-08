@@ -4,11 +4,11 @@ from typing import cast
 
 import pytest
 
-from tau.agent import AgentSession
-from tau.commands import discover
-from tau.cli import Repl
-from tau.messages import Usage
-from tau.theme import Theme
+from ly.agent import AgentSession
+from ly.commands import discover
+from ly.cli import Repl
+from ly.messages import Usage
+from ly.theme import Theme
 
 
 @pytest.fixture

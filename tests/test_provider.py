@@ -8,8 +8,8 @@ from typing import Any, ClassVar, cast
 
 import pytest
 
-from tau.events import ReasoningDeltaEvent, TextDeltaEvent, ToolNameEvent
-from tau.messages import (
+from ly.events import ReasoningDeltaEvent, TextDeltaEvent, ToolNameEvent
+from ly.messages import (
     AssistantMessage,
     TextContent,
     ToolCall,
@@ -18,11 +18,11 @@ from tau.messages import (
     deserialize_message,
     serialize_message,
 )
-from tau.providers import Provider, ProviderError
-from tau.providers.backend import ChatCompletionsBackend
-from tau.providers.errors import MissingBaseURLError, MissingCredentialsError
-from tau.providers.sse import StreamReader
-from tau.tools import Tool
+from ly.providers import Provider, ProviderError
+from ly.providers.backend import ChatCompletionsBackend
+from ly.providers.errors import MissingBaseURLError, MissingCredentialsError
+from ly.providers.sse import StreamReader
+from ly.tools import Tool
 
 
 class FakeReader(StreamReader):
@@ -101,7 +101,7 @@ class NoopTool(Tool):
 
 
 def body_with_tools(backend: ChatCompletionsBackend) -> dict[str, Any]:
-    """The request body tau would send for one turn that has tools."""
+    """The request body ly would send for one turn that has tools."""
     return json.loads(backend._make_request_body("system", [], [NoopTool()]))
 
 
@@ -481,7 +481,7 @@ def test_response_records_api_and_model():
 
 
 def test_request_omits_reasoning_effort(monkeypatch):
-    monkeypatch.setenv("TAU_REASONING_EFFORT", "high")
+    monkeypatch.setenv("LY_REASONING_EFFORT", "high")
     backend, _ = make_backend([])
 
     assert "reasoning_effort" not in body_with_tools(backend)
@@ -563,7 +563,7 @@ def test_stream_that_yields_no_text_has_no_empty_text_block():
 def test_missing_base_url_raises_at_construction():
     with pytest.raises(MissingBaseURLError) as exc:
         Provider(api_key="test-key")
-    assert "TAU_BASE_URL" in str(exc.value)
+    assert "LY_BASE_URL" in str(exc.value)
     assert exc.value.retryable is False
 
 
@@ -573,7 +573,7 @@ def test_missing_base_url_raises_at_construction():
 def test_missing_credentials_raise_at_construction(base_url):
     with pytest.raises(MissingCredentialsError) as exc:
         Provider(base_url=base_url)
-    assert str(exc.value) == "Missing credentials. Set TAU_API_KEY or pass --api-key."
+    assert str(exc.value) == "Missing credentials. Set LY_API_KEY or pass --api-key."
 
 
 def test_abort_mid_stream_closes_reader_and_reports_aborted():

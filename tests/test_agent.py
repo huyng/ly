@@ -1,12 +1,12 @@
-"""Tests for the tau agent harness using a scripted fake backend."""
+"""Tests for the ly agent harness using a scripted fake backend."""
 
 import json
 from typing import Any, ClassVar, cast
 
 import pytest
 
-from tau.agent import AgentSession
-from tau.events import (
+from ly.agent import AgentSession
+from ly.events import (
     AgentEndEvent,
     AgentStartEvent,
     ErrorEvent,
@@ -16,7 +16,7 @@ from tau.events import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
-from tau.messages import (
+from ly.messages import (
     AssistantMessage,
     TextContent,
     ToolCall,
@@ -24,12 +24,12 @@ from tau.messages import (
     Usage,
     UserMessage,
 )
-from tau.providers import Provider, ProviderError, make_backend
-from tau.providers.backend import ModelBackend
-from tau.providers.sse import StreamReader
-from tau.session import SessionManager
-from tau.tools import Tool, ToolResult
-from tau.tools.task import SubAgentTool
+from ly.providers import Provider, ProviderError, make_backend
+from ly.providers.backend import ModelBackend
+from ly.providers.sse import StreamReader
+from ly.session import SessionManager
+from ly.tools import Tool, ToolResult
+from ly.tools.task import SubAgentTool
 
 
 class FakeBackend(ModelBackend):
@@ -423,7 +423,7 @@ def test_permanent_error_is_not_retried(tmp_path):
 
 
 def test_transient_error_is_retried(tmp_path, monkeypatch):
-    monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
+    monkeypatch.setattr("ly.agent.RETRY_DELAYS", (0, 0, 0))
 
     class FlakyBackend(FakeBackend):
         api = "fake"
@@ -455,7 +455,7 @@ def test_transient_error_is_retried(tmp_path, monkeypatch):
 def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
     """A retried turn re-streams from its first token, so hosts must see one
     MessageStartEvent per attempt to reset a half-rendered message."""
-    monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
+    monkeypatch.setattr("ly.agent.RETRY_DELAYS", (0, 0, 0))
 
     class FlakyBackend(FakeBackend):
         api = "fake"
@@ -499,7 +499,7 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
 def test_create_agent_session_binds_tools_to_the_requested_cwd(tmp_path):
     """Regression: `cwd` reached the system prompt and the policy guard but
     not the tools, so relative writes landed in the process cwd."""
-    from tau import create_agent_session
+    from ly import create_agent_session
 
     session = create_agent_session(
         cwd=str(tmp_path),
@@ -533,7 +533,7 @@ def failing_backend(reason, *, retryable=False):
 
 
 def test_content_filter_is_not_retried(tmp_path, monkeypatch):
-    monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
+    monkeypatch.setattr("ly.agent.RETRY_DELAYS", (0, 0, 0))
     backend = failing_backend("content_filter")
     session = AgentSession(
         backend=backend,
@@ -547,7 +547,7 @@ def test_content_filter_is_not_retried(tmp_path, monkeypatch):
 
 
 def test_server_overload_is_retried(tmp_path, monkeypatch):
-    monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
+    monkeypatch.setattr("ly.agent.RETRY_DELAYS", (0, 0, 0))
     backend = failing_backend("insufficient_system_resource", retryable=True)
     session = AgentSession(
         backend=backend,
@@ -645,7 +645,7 @@ def test_unexpected_provider_failure_is_not_retried(during_stream):
 
 @pytest.mark.parametrize("api", ["chat", "responses"])
 def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
-    monkeypatch.setattr("tau.agent.RETRY_DELAYS", (0, 0, 0))
+    monkeypatch.setattr("ly.agent.RETRY_DELAYS", (0, 0, 0))
     requests = []
 
     class FakeReader(StreamReader):
@@ -695,8 +695,8 @@ def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
 def test_repl_renders_text_and_reasoning_deltas(capsys):
     """Regression: the interactive REPL must print streamed text (it used to
     only render tool events, so replies were invisible)."""
-    from tau.cli import Repl
-    from tau.events import MessageEndEvent, MessageStartEvent, ReasoningDeltaEvent
+    from ly.cli import Repl
+    from ly.events import MessageEndEvent, MessageStartEvent, ReasoningDeltaEvent
 
     class StubSession:
         backend = type("B", (), {"provider": type("P", (), {"model": "m"})()})()

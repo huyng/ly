@@ -22,7 +22,7 @@ from .read import ReadTool
 from .search import GlobTool, GrepTool
 
 SUBAGENT_SYSTEM_PROMPT = """\
-You are a sub-agent inside tau, a coding agent. You were spawned to answer one
+You are a sub-agent inside ly, a coding agent. You were spawned to answer one
 self-contained question; the agent that spawned you cannot be asked anything,
 so work with what you were given.
 

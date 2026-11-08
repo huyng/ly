@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from tau.messages import (
+from ly.messages import (
     AssistantMessage,
     ToolResultMessage,
     UserMessage,
     deserialize_message,
     serialize_message,
 )
-from tau.session import SessionManager
+from ly.session import SessionManager
 
 
 def touch(path: Path, lines: list[str] | None = None) -> Path:
@@ -39,9 +39,9 @@ def test_new_session_uses_dated_dir_and_12_hex_name(tmp_path):
 
 def test_list_sessions_ignores_foreign_layouts(tmp_path):
     ours = touch(tmp_path / "2026-10-20" / "02c4deaded60.jsonl")
-    # a project-dir session from the full tau CLI (32-hex id + index file)
-    touch(tmp_path / "home-huyng-tau-32d852" / "9949e2acc878490ca6def010b1fc1c5b.jsonl")
-    touch(tmp_path / "home-huyng-tau-32d852" / "index.jsonl")
+    # a project-dir session from the full ly CLI (32-hex id + index file)
+    touch(tmp_path / "home-huyng-ly-32d852" / "9949e2acc878490ca6def010b1fc1c5b.jsonl")
+    touch(tmp_path / "home-huyng-ly-32d852" / "index.jsonl")
     # wrong-shaped names inside a date dir are still not ours
     touch(tmp_path / "2026-10-21" / "9949e2acc878490ca6def010b1fc1c5b.jsonl")
     touch(tmp_path / "2026-10-21" / "notasession.jsonl")
@@ -87,7 +87,7 @@ def test_round_trip_reload(tmp_path):
     ],
 )
 def test_message_timestamp_round_trip(message, monkeypatch):
-    monkeypatch.setattr("tau.messages.time.time", lambda: 0.999)
+    monkeypatch.setattr("ly.messages.time.time", lambda: 0.999)
     message.timestamp = 123
     saved = serialize_message(message)
 
@@ -153,7 +153,7 @@ def test_active_branch_preserves_timestamps(monkeypatch):
     message = UserMessage("hello")
     message.timestamp = 123
     manager.append(message)
-    monkeypatch.setattr("tau.messages.time.time", lambda: 0.999)
+    monkeypatch.setattr("ly.messages.time.time", lambda: 0.999)
 
     assert manager.active_branch()[0].timestamp == 123
     assert manager.active_branch()[0].timestamp == 123

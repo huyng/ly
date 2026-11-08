@@ -2,7 +2,7 @@
 
 import time
 
-from tau.spinner import ERASE_LINE, FRAMES, HIDE_CURSOR, SHOW_CURSOR, Spinner
+from ly.spinner import ERASE_LINE, FRAMES, HIDE_CURSOR, SHOW_CURSOR, Spinner
 
 
 class FakeTty:

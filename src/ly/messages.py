@@ -15,7 +15,7 @@ An assistant message can contain both text and tool calls.
 Session JSON uses camelCase for Python's snake_case fields (for example,
 stop_reason becomes stopReason). The role identifies the message variant;
 each content block's type identifies text or toolCall. Optional error and
-reasoning fields are omitted when empty. These are tau's internal messages,
+reasoning fields are omitted when empty. These are ly's internal messages,
 not provider request bodies; each backend converts them to its API format.
 """
 

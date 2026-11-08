@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from tau.tools.search import GlobTool, GrepTool, _expand_braces
+from ly.tools.search import GlobTool, GrepTool, _expand_braces
 
 
 @pytest.fixture
@@ -236,7 +236,7 @@ def test_glob_missing_path(glob):
 
 
 def test_tool_schemas_validate(tree):
-    from tau.tools.validation import validate_arguments
+    from ly.tools.validation import validate_arguments
 
     grep, glob = GrepTool(cwd=str(tree)), GlobTool(cwd=str(tree))
     assert validate_arguments(grep.parameters, {"pattern": "x"}) == []

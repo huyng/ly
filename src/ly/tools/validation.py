@@ -1,6 +1,6 @@
 """Minimal JSON-Schema validation for tool arguments.
 
-Only the subset of JSON Schema that tau's tool definitions actually use is
+Only the subset of JSON Schema that ly's tool definitions actually use is
 implemented: object schemas with ``properties`` and ``required``, primitive
 types, and arrays with ``items``. There is no dependency on ``jsonschema``
 and no support for ``$ref``, ``oneOf``, ``pattern``, ``enum``, and friends.

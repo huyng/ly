@@ -2,7 +2,7 @@
 
 Modes:
 - interactive (default): stream responses, use slash commands
-- print: `tau -p "prompt"` runs once and writes the final response
+- print: `ly -p "prompt"` runs once and writes the final response
 
 Both modes run inside a Docker container by default; `--nosandbox` stays on
 the host (see sandbox.py).
@@ -79,7 +79,7 @@ def use_container(args: argparse.Namespace) -> bool:
     """Return True when this process should hand off to `docker run` first."""
     if sandbox.in_container() or args.nosandbox:
         return False
-    return _flag("TAU_DOCKER") is not False
+    return _flag("LY_DOCKER") is not False
 
 
 def make_session(args: argparse.Namespace) -> AgentSession:
@@ -87,7 +87,7 @@ def make_session(args: argparse.Namespace) -> AgentSession:
         model=args.model,
         base_url=args.base_url,
         api_key=args.api_key,
-        pass_reasoning_content=_flag("TAU_PASS_REASONING_CONTENT"),
+        pass_reasoning_content=_flag("LY_PASS_REASONING_CONTENT"),
     )
     manager = SessionManager()
     if args.resume:
@@ -301,7 +301,7 @@ class Repl:
         # print startup banner
         theme = self.theme
         print(
-            f"{theme.bold('tau')} {theme.dim('v' + __version__)} {theme.dim('·')} "
+            f"{theme.bold('ly')} {theme.dim('v' + __version__)} {theme.dim('·')} "
             f"{theme.model(self.session.backend.provider.model)}"
         )
         print(theme.dim(f"  • session {self.session.session_manager.file}"))
@@ -519,12 +519,12 @@ def print_mode(args: argparse.Namespace) -> None:
     """Run one prompt, write the final response to stdout.
 
     Deliberately plain: no styling, no tool chatter, no spinners. Failures go
-    to stderr with a non-zero exit, so `tau -p` is usable in scripts.
+    to stderr with a non-zero exit, so `ly -p` is usable in scripts.
     """
     # A script cannot see the sandbox from its output, and mistakes here are
     # silent, so say which one ran. stderr keeps stdout pipeable.
     if sandbox.in_container():
-        print(f"tau: docker {sandbox.image_name()}", file=sys.stderr, flush=True)
+        print(f"ly: docker {sandbox.image_name()}", file=sys.stderr, flush=True)
     session = make_session(args)
     failures: list[str] = []
 
@@ -541,14 +541,14 @@ def print_mode(args: argparse.Namespace) -> None:
         unsubscribe()
     print()
     if failures:
-        print(f"tau: {failures[-1]}", file=sys.stderr)
+        print(f"ly: {failures[-1]}", file=sys.stderr)
         sys.exit(1)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """The command line, with `TAU_*` variables filled in as argument defaults."""
+    """The command line, with `LY_*` variables filled in as argument defaults."""
     parser = argparse.ArgumentParser(
-        prog="tau", description="A minimal coding agent, modeled after pi"
+        prog="ly", description="A minimal coding agent, modeled after pi"
     )
     parser.add_argument("prompt", nargs="?", help="starting prompt (interactive mode)")
     parser.add_argument(
@@ -560,24 +560,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-m",
         "--model",
-        default=os.environ.get("TAU_MODEL") or "gpt-4.1",
-        help="model to use (default: $TAU_MODEL or gpt-4.1)",
+        default=os.environ.get("LY_MODEL") or "gpt-4.1",
+        help="model to use (default: $LY_MODEL or gpt-4.1)",
     )
     parser.add_argument(
         "--base-url",
-        default=os.environ.get("TAU_BASE_URL") or "",
-        help="OpenAI-compatible API base URL (default: $TAU_BASE_URL)",
+        default=os.environ.get("LY_BASE_URL") or "",
+        help="OpenAI-compatible API base URL (default: $LY_BASE_URL)",
     )
     parser.add_argument(
         "--api-key",
-        default=os.environ.get("TAU_API_KEY"),
-        help="API key (default: $TAU_API_KEY)",
+        default=os.environ.get("LY_API_KEY"),
+        help="API key (default: $LY_API_KEY)",
     )
     parser.add_argument(
         "--api",
         choices=("chat", "responses"),
-        default=os.environ.get("TAU_API") or "chat",
-        help="OpenAI endpoint flavour (default: $TAU_API or chat); the newest "
+        default=os.environ.get("LY_API") or "chat",
+        help="OpenAI endpoint flavour (default: $LY_API or chat); the newest "
         "models need `responses` to use tools",
     )
     parser.add_argument(
@@ -589,7 +589,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="run on the host instead of inside a Docker container",
     )
-    parser.add_argument("--version", action="version", version=f"tau {__version__}")
+    parser.add_argument("--version", action="version", version=f"ly {__version__}")
     return parser
 
 
@@ -613,8 +613,8 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(str(exc))
     except OSError as exc:
         # The sessions directory is the only thing startup writes. Nothing here
-        # says why it failed: a refusal is the machine's state, not tau's.
-        sys.exit(f"tau: cannot save sessions in {SESSIONS_DIR}: {exc}")
+        # says why it failed: a refusal is the machine's state, not ly's.
+        sys.exit(f"ly: cannot save sessions in {SESSIONS_DIR}: {exc}")
 
     repl = Repl(session)
     if args.prompt:

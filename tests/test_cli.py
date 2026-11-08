@@ -3,21 +3,21 @@ not just the cumulative token totals."""
 
 import pytest
 
-from tau.agent import AgentSession
-from tau.cli import Repl, build_parser
-from tau.compaction import CompactionConfig
-from tau.events import TaskActivityEvent, ToolExecutionEndEvent, ToolExecutionStartEvent
-from tau.messages import (
+from ly.agent import AgentSession
+from ly.cli import Repl, build_parser
+from ly.compaction import CompactionConfig
+from ly.events import TaskActivityEvent, ToolExecutionEndEvent, ToolExecutionStartEvent
+from ly.messages import (
     AssistantMessage,
     TextContent,
     ToolCall,
     ToolResultMessage,
     Usage,
 )
-from tau.providers import Provider
-from tau.providers.backend import ModelBackend
-from tau.session import SessionManager
-from tau.theme import Theme
+from ly.providers import Provider
+from ly.providers.backend import ModelBackend
+from ly.session import SessionManager
+from ly.theme import Theme
 
 
 class ScriptedBackend(ModelBackend):
@@ -102,8 +102,8 @@ def test_status_line_omits_the_threshold_when_compaction_is_disabled(capsys):
 
 def test_banner_names_the_container_image(capsys, monkeypatch):
     repl = make_repl()
-    monkeypatch.setenv("TAU_IN_CONTAINER", "1")
-    monkeypatch.setenv("TAU_IMAGE", "example/image:1")
+    monkeypatch.setenv("LY_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_IMAGE", "example/image:1")
     monkeypatch.setattr(repl, "_read", lambda prompt: None)
 
     repl.run()
@@ -114,23 +114,23 @@ def test_banner_names_the_container_image(capsys, monkeypatch):
 def test_banner_names_the_host_directory_that_was_mounted(capsys, monkeypatch):
     repl = make_repl()
     repl.session.cwd = "/workspace"
-    monkeypatch.setenv("TAU_IN_CONTAINER", "1")
-    monkeypatch.setenv("TAU_IMAGE", "example/image:1")
-    monkeypatch.setenv("TAU_HOST_DIR", "/Users/someone/tau")
+    monkeypatch.setenv("LY_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_IMAGE", "example/image:1")
+    monkeypatch.setenv("LY_HOST_DIR", "/Users/someone/ly")
     monkeypatch.setattr(repl, "_read", lambda prompt: None)
 
     repl.run()
 
     out = capsys.readouterr().out
-    assert "/Users/someone/tau → /workspace" in out
+    assert "/Users/someone/ly → /workspace" in out
 
 
 def test_banner_copes_when_the_host_directory_is_unknown(capsys, monkeypatch):
     repl = make_repl()
     repl.session.cwd = "/workspace"
-    monkeypatch.setenv("TAU_IN_CONTAINER", "1")
-    monkeypatch.setenv("TAU_IMAGE", "example/image:1")
-    monkeypatch.delenv("TAU_HOST_DIR", raising=False)
+    monkeypatch.setenv("LY_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_IMAGE", "example/image:1")
+    monkeypatch.delenv("LY_HOST_DIR", raising=False)
     monkeypatch.setattr(repl, "_read", lambda prompt: None)
 
     repl.run()
@@ -142,7 +142,7 @@ def test_banner_copes_when_the_host_directory_is_unknown(capsys, monkeypatch):
 
 def test_banner_stays_quiet_on_the_host(capsys, monkeypatch):
     repl = make_repl()
-    monkeypatch.delenv("TAU_IN_CONTAINER", raising=False)
+    monkeypatch.delenv("LY_IN_CONTAINER", raising=False)
     monkeypatch.setattr(repl, "_read", lambda prompt: None)
 
     repl.run()
@@ -151,31 +151,31 @@ def test_banner_stays_quiet_on_the_host(capsys, monkeypatch):
 
 
 def test_print_mode_says_it_is_in_docker_on_stderr(monkeypatch, capsys):
-    from tau.cli import print_mode
+    from ly.cli import print_mode
 
-    monkeypatch.setenv("TAU_IN_CONTAINER", "1")
-    monkeypatch.setenv("TAU_IMAGE", "example/image:1")
+    monkeypatch.setenv("LY_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_IMAGE", "example/image:1")
 
     def no_session(_args):
         raise SystemExit(0)
 
-    monkeypatch.setattr("tau.cli.make_session", no_session)
+    monkeypatch.setattr("ly.cli.make_session", no_session)
 
     with pytest.raises(SystemExit):
         print_mode(build_parser().parse_args(["-p", "hi"]))
 
     captured = capsys.readouterr()
-    assert captured.err == "tau: docker example/image:1\n"
+    assert captured.err == "ly: docker example/image:1\n"
     assert captured.out == ""  # stdout stays clean for pipes
 
 
 def test_env_variables_become_argument_defaults(monkeypatch):
-    from tau.cli import build_parser
+    from ly.cli import build_parser
 
-    monkeypatch.setenv("TAU_MODEL", "deepseek-flash")
-    monkeypatch.setenv("TAU_BASE_URL", "https://api.deepseek.com")
-    monkeypatch.setenv("TAU_API_KEY", "env-key")
-    monkeypatch.setenv("TAU_API", "responses")
+    monkeypatch.setenv("LY_MODEL", "deepseek-flash")
+    monkeypatch.setenv("LY_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("LY_API_KEY", "env-key")
+    monkeypatch.setenv("LY_API", "responses")
 
     args = build_parser().parse_args([])
 
@@ -186,10 +186,10 @@ def test_env_variables_become_argument_defaults(monkeypatch):
 
 
 def test_flags_override_env_variables(monkeypatch):
-    from tau.cli import build_parser
+    from ly.cli import build_parser
 
-    monkeypatch.setenv("TAU_BASE_URL", "https://env.example/v1")
-    monkeypatch.setenv("TAU_API_KEY", "env-key")
+    monkeypatch.setenv("LY_BASE_URL", "https://env.example/v1")
+    monkeypatch.setenv("LY_API_KEY", "env-key")
 
     args = build_parser().parse_args(
         ["--base-url", "https://flag.example/v1", "--api-key", "flag-key"]
@@ -200,26 +200,26 @@ def test_flags_override_env_variables(monkeypatch):
 
 
 def test_pass_reasoning_content_env_flag_is_tri_state(monkeypatch):
-    from tau.cli import _flag
+    from ly.cli import _flag
 
-    monkeypatch.delenv("TAU_PASS_REASONING_CONTENT", raising=False)
-    assert _flag("TAU_PASS_REASONING_CONTENT") is None
+    monkeypatch.delenv("LY_PASS_REASONING_CONTENT", raising=False)
+    assert _flag("LY_PASS_REASONING_CONTENT") is None
 
-    monkeypatch.setenv("TAU_PASS_REASONING_CONTENT", "yes")
-    assert _flag("TAU_PASS_REASONING_CONTENT") is True
+    monkeypatch.setenv("LY_PASS_REASONING_CONTENT", "yes")
+    assert _flag("LY_PASS_REASONING_CONTENT") is True
 
-    monkeypatch.setenv("TAU_PASS_REASONING_CONTENT", "off")
-    assert _flag("TAU_PASS_REASONING_CONTENT") is False
+    monkeypatch.setenv("LY_PASS_REASONING_CONTENT", "off")
+    assert _flag("LY_PASS_REASONING_CONTENT") is False
 
 
 def test_a_sessions_directory_that_cannot_be_written_is_explained(monkeypatch):
     """The traceback would be about os.mkdir; name the directory instead."""
-    from tau.cli import main
-    from tau.session import SessionManager
+    from ly.cli import main
+    from ly.session import SessionManager
 
-    monkeypatch.setenv("TAU_IN_CONTAINER", "1")
-    monkeypatch.setenv("TAU_BASE_URL", "https://x/v1")
-    monkeypatch.setenv("TAU_API_KEY", "test")
+    monkeypatch.setenv("LY_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_BASE_URL", "https://x/v1")
+    monkeypatch.setenv("LY_API_KEY", "test")
 
     def refuse(self):
         raise PermissionError(13, "Permission denied", "/sessions/2026-11-06")

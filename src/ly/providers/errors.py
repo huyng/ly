@@ -32,10 +32,10 @@ class MissingCredentialsError(ProviderError):
 
     def __init__(self):
         super().__init__(
-            "Missing credentials. Set TAU_API_KEY or pass --api-key.", retryable=False
+            "Missing credentials. Set LY_API_KEY or pass --api-key.", retryable=False
         )
 
 
 class MissingBaseURLError(ProviderError):
     def __init__(self):
-        super().__init__("Missing Base URL for api. Set TAU_BASE_URL", retryable=False)
+        super().__init__("Missing Base URL for api. Set LY_BASE_URL", retryable=False)

@@ -1,7 +1,7 @@
 """ANSI styling for the interactive terminal UI.
 
 Styling is disabled automatically when stdout is not a TTY, when ``NO_COLOR``
-is set, or when ``TERM=dumb``. That keeps ``tau -p`` (and any piped output)
+is set, or when ``TERM=dumb``. That keeps ``ly -p`` (and any piped output)
 free of escape sequences.
 
 The palette deliberately sticks to the basic 16 ANSI colors so it inherits

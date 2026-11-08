@@ -1,12 +1,12 @@
 """Tests for the terminal presentation layer."""
 
-from tau.render import (
+from ly.render import (
     GutterWriter,
     MarkdownRenderer,
     render_tool_result,
     summarize_tool_call,
 )
-from tau.theme import Theme, color_enabled
+from ly.theme import Theme, color_enabled
 
 
 class FakeTty:

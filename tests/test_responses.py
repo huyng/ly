@@ -5,8 +5,8 @@ from typing import Any, ClassVar
 
 import pytest
 
-from tau.events import ReasoningDeltaEvent, TextDeltaEvent, ToolNameEvent
-from tau.messages import (
+from ly.events import ReasoningDeltaEvent, TextDeltaEvent, ToolNameEvent
+from ly.messages import (
     AssistantMessage,
     TextContent,
     ToolCall,
@@ -15,10 +15,10 @@ from tau.messages import (
     deserialize_message,
     serialize_message,
 )
-from tau.providers import Provider, ProviderError, make_backend
-from tau.providers.backend import ChatCompletionsBackend, ResponsesBackend
-from tau.providers.sse import StreamReader
-from tau.tools import Tool
+from ly.providers import Provider, ProviderError, make_backend
+from ly.providers.backend import ChatCompletionsBackend, ResponsesBackend
+from ly.providers.sse import StreamReader
+from ly.tools import Tool
 
 
 class FakeReader(StreamReader):
@@ -487,7 +487,7 @@ def test_tool_schemas_are_flat_on_requests():
 
 
 def test_reasoning_summary_uses_default_effort(monkeypatch):
-    monkeypatch.setenv("TAU_REASONING_EFFORT", "high")
+    monkeypatch.setenv("LY_REASONING_EFFORT", "high")
     backend = make_backend_for([])
 
     collect(backend, [UserMessage(content="hi")])

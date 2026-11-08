@@ -2,7 +2,7 @@
 
 import pytest
 
-from tau.prompts import build_system_prompt, context_files
+from ly.prompts import build_system_prompt, context_files
 
 
 def write_context(path, text):

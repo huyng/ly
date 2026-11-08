@@ -1,20 +1,20 @@
 """System prompt assembly: base instructions plus discovered context files.
 
-tau builds the system prompt from base instructions and context
+ly builds the system prompt from base instructions and context
 files (AGENTS.md) in the working directory and in ~/.agents. When both scopes
 carry instructions the prompt says so instead of merging them: a personal
 default and a project override can disagree, and hiding that would leave the
 model silently following whichever one happened to be concatenated last.
 
 The working directory is the only project location read. Ancestors are not
-searched, so a project's instructions apply when tau runs at that project's
+searched, so a project's instructions apply when ly runs at that project's
 root and are absent when it runs in a subdirectory.
 """
 
 import os
 
 BASE_SYSTEM_PROMPT = """\
-You are tau, an expert coding assistant operating inside tau, a coding agent \
+You are ly, an expert coding assistant operating inside ly, a coding agent \
 harness. You help users by reading files, executing commands, editing code, \
 and writing new files.
 

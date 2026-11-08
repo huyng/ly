@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from tau.messages import ToolCall
-from tau.policy import basic_guard
+from ly.messages import ToolCall
+from ly.policy import basic_guard
 
 
 def call(name: str, **arguments: Any) -> ToolCall:
@@ -77,7 +77,7 @@ def test_basic_guard_allows_the_system_temp_dir(tmp_path):
     # Scratch is where it is without any configuration; otherwise the model
     # just writes the same file through bash.
     guard = basic_guard(str(tmp_path / "root"))
-    target = os.path.join(tempfile.gettempdir(), "tau-test-scratch", "cases.py")
+    target = os.path.join(tempfile.gettempdir(), "ly-test-scratch", "cases.py")
     assert guard(call("write", path=target, content="")) is None
 
 

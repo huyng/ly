@@ -1,4 +1,4 @@
-# ly
+# lý
 
 A minimal, extensible AI coding agent for the terminal, written in Python and modeled after [pi](https://pi.dev). It transparently runs sandboxed inside Docker by default.
 

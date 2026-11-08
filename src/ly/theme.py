@@ -15,6 +15,16 @@ import sys
 RESET = "\x1b[0m"
 BOLD = "\x1b[1m"
 DIM = "\x1b[2m"
+# A dark green band with pale green text for the user's prompt. The background
+# uses 24-bit colour: the 256-colour cube bottoms out at #005f00 for green, and
+# the next step down is black. Terminals without truecolor fall back to their own
+# background, where the pale green text still reads.
+SHADE = "\x1b[48;2;0;51;0m\x1b[38;5;194m"
+
+# Erase to end of line. Printed while SHADE is still active, so the terminal fills
+# the rest of the row with the band's background instead of writing the padding
+# out as literal spaces, which reflow into extra rows when the window narrows.
+BAND = "\x1b[K"
 
 RED = "\x1b[31m"
 GREEN = "\x1b[32m"

@@ -13,6 +13,7 @@ import os
 import re
 import readline
 import sys
+import textwrap
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -48,7 +49,7 @@ from .render import (
 )
 from .session import SESSIONS_DIR, SessionManager
 from .spinner import Spinner
-from .theme import DIM, Theme, get_theme, terminal_width
+from .theme import BAND, DIM, RESET, SHADE, Theme, get_theme, terminal_width
 from .tools import default_tools
 
 HELP = """\
@@ -314,6 +315,10 @@ class Repl:
             print(theme.dim(detail))
         for path, scope, _ in context_files(self.session.cwd):
             print(theme.dim(f"  • {scope.lower()} AGENTS.md {path}"))
+
+        # blank line after banner
+        print()
+
         while True:
             try:
                 line = self._read(theme.accent("» "))
@@ -332,7 +337,46 @@ class Repl:
                     break
                 continue
 
+            # Pick up a resize made while the prompt was being typed; the next
+            # turn refreshes it again in _on_message_start.
+            self.width = terminal_width()
+            print()  # space the block off from what the user just typed
+            self._print_prompt(line)
             self._submit(line)
+
+    def _print_prompt(self, text: str) -> None:
+        """Echo a submitted prompt on a dark green band.
+
+        Each row paints a single space and erases to the end of the line: most
+        terminals fill erased cells with the current background, so the band
+        still reaches the window edge while only a couple of cells are written.
+        That keeps a resized window from reflowing the padding into extra rows.
+        Long lines wrap short of the edge so the terminal never has to.
+
+        Args:
+            text: The prompt the user submitted.
+        """
+        width = self.width
+        # The glyph echoes the `» ` the user typed, repeated on every row so a
+        # wrapped prompt still reads as one block.
+        glyph = " » "
+
+        def row(text: str) -> str:
+            """Paint one band row and fill the rest of it."""
+            if not self.theme.enabled:
+                return text  # no band without colour; keep the output clean
+            return f"{SHADE}{text}{BAND}{RESET}"
+
+        print(row(" "))  # one empty band row above the text
+        for line in text.splitlines():
+            for line_no, part in enumerate(textwrap.wrap(line, width - len(glyph) - 1) or [""]):
+                if line_no == 0:
+                    print(row(f"{glyph}{part}"))
+                else:
+                    print(row(f"   {part}"))
+
+        print(row(" "))  # and one below
+        print()  # an unpainted line closes the band
 
     def _read(self, prompt: str) -> str | None:
         """Read a prompt, keeping bracketed pastes together until Enter."""

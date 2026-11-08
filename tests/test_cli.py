@@ -6,7 +6,14 @@ import pytest
 from ly.agent import AgentSession
 from ly.cli import Repl, build_parser
 from ly.compaction import CompactionConfig
-from ly.events import TaskActivityEvent, ToolExecutionEndEvent, ToolExecutionStartEvent
+from ly.events import (
+    MessageEndEvent,
+    MessageStartEvent,
+    ReasoningDeltaEvent,
+    TaskActivityEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+)
 from ly.messages import (
     AssistantMessage,
     TextContent,
@@ -49,6 +56,25 @@ def make_repl(threshold_tokens: int = 100_000, enabled: bool = True) -> Repl:
     )
     session.usage = Usage(input=1_234, output=567, total_tokens=1_801)
     return Repl(session, Theme(enabled=False))
+
+
+def test_a_retry_finishes_the_reasoning_frame_before_starting_another(capsys):
+    """A retry re-enters at MessageStart; its frame must not stack on the first."""
+    repl = make_repl()
+    repl._on_event(MessageStartEvent())
+    repl._on_event(ReasoningDeltaEvent(delta="first attempt\n"))
+    # The provider failed during reasoning and the loop started over.
+    repl._on_event(MessageStartEvent())
+    repl._on_event(ReasoningDeltaEvent(delta="second attempt\n"))
+    repl._on_event(
+        MessageEndEvent(
+            AssistantMessage(content=[TextContent(text="done")], model="fake")
+        )
+    )
+
+    out = capsys.readouterr().out
+    assert out.count("╭─ thinking") == 2
+    assert out.count("╰─") == 2  # every frame that opened also closed
 
 
 def test_task_activity_shows_calls_and_status_without_child_output(capsys):

@@ -156,6 +156,9 @@ class Repl:
         pass
 
     def _on_message_start(self, _event: MessageStartEvent) -> None:
+        # A retry re-enters here mid-stream. Close the failed attempt's reasoning
+        # frame first, or the retry nests a second header inside the first.
+        self._finish_reasoning()
         self._text_started = False
         self._text_ends_newline = False
         # A resize between turns should land here rather than mid-line.

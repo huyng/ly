@@ -24,6 +24,70 @@ export LY_MODEL=gpt-4.1           # The model you would like to use
 export LY_BASE_URL=
 ```
 
+### Environment variables
+
+Every setting can come from the environment; a command-line flag wins where
+one exists. These are read by `ly` itself:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `LY_API_KEY` | — | API key for the provider (required) |
+| `LY_BASE_URL` | — | OpenAI-compatible base URL, such as `https://api.openai.com/v1` (required) |
+| `LY_MODEL` | `gpt-4.1` | Model to ask for |
+| `LY_API` | `chat` | Wire format: `chat` for `/chat/completions`, `responses` for `/responses` |
+| `LY_PASS_REASONING_CONTENT` | on when the base URL contains `deepseek` | Echo `reasoning_content` back on tool calls, which DeepSeek requires. `0`, `false`, `no` or `off` turns it off |
+| `LY_DOCKER` | `1` | Set to `0` to run on the host instead of in Docker (same as `--nosandbox`) |
+| `LY_DOCKER_IMAGE` | `python:3.12` | Image to run in when sandboxed (same as `--sandbox`) |
+| `LY_SESSIONS_DIR` | `~/.ly/sessions` | Where session JSONL files are written |
+| `LY_COMPACT` | `1` | Set to `0` to disable automatic compaction |
+| `LY_COMPACT_THRESHOLD` | `100000` | Estimated tokens in the branch that trigger compaction |
+| `LY_COMPACT_KEEP_TURNS` | `4` | Recent user turns kept verbatim |
+| `LY_COMPACT_INPUT_TOKENS` | `30000` | Cap per summarization request; longer histories are folded in batches |
+
+Styling also follows the usual terminal variables:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `NO_COLOR` | unset | Any value disables ANSI styling |
+| `FORCE_COLOR` | unset | Any value forces styling, unless `NO_COLOR` is also set |
+| `TERM` | from the shell | `dumb` disables styling |
+
+`LY_SB_*` variables are set by the host for the copy of ly inside the
+container and are not meant to be set by hand; see
+[Sandboxing with Docker](#sandboxing-with-docker).
+
+### Settings file
+
+Anything you would otherwise export can live in `~/.ly/settings.json`
+instead. Every key is optional, and a missing or malformed file simply means
+defaults, so a typo cannot stop `ly` from starting.
+
+```json
+{
+  "model": "gpt-4.1",
+  "base_url": "https://api.openai.com/v1",
+  "api": "chat",
+  "markdown": true,
+  "thinking": true,
+  "sandbox": true,
+  "compaction": { "threshold_tokens": 32000 }
+}
+```
+
+An `LY_*` variable beats this file, which beats the built-in default:
+`LY_MODEL=deepseek-chat ly` overrides `"model"` here for one run. The
+environment is read in one place, `ly/settings.py`, which is also where the
+file is read, so there is a single answer to "where did this value come
+from?". `sandbox: false` is the same as `LY_DOCKER=0` or passing
+`--nosandbox` every time, `markdown` and `thinking` set the starting state of
+`/plain` and `/thinking`, and `api` must be `chat` or `responses`. The
+provider options have no command-line flags: they come from `LY_*` and this
+file only, so the host and the sandbox cannot disagree about which endpoint
+they are talking to. Unknown keys and values of the wrong type are ignored
+one at a time. The API key is not read from this file; keep it in
+`LY_API_KEY`. The Docker image is not read from it either: use `--sandbox`
+or `LY_DOCKER_IMAGE`. Run `/config` to see the values actually in effect.
+
 ## Use
 
 ```bash
@@ -31,6 +95,7 @@ ly                                # interactive REPL in the current directory
 ly "fix the failing tests"        # start with an initial prompt
 ly -p "what does this repo do?"   # print mode: run once, write final response
 ly --resume 2                     # resume a previous session
+ly -s python:3.12                 # run in the named Docker image
 ```
 
 ### Custom slash commands
@@ -68,17 +133,27 @@ the image's `/root`; anything the `bash` tool sets up via `~` (a `~/.gitconfig`,
 
 podman works too, including rootless podman behind the `docker` shim.
 
+Variables starting with `LY_SB_` describe the container to the copy of ly
+running inside it: `LY_SB_IN_CONTAINER`, `LY_SB_IMAGE`, `LY_SB_HOST_DIR` and
+`LY_SB_SESSIONS_DIR`. They are set by the host for that run and never forwarded,
+so a stale value cannot describe the wrong container. `LY_DOCKER` and
+`LY_DOCKER_IMAGE` also stay behind, because they chose what to start. Every
+other `LY_*` variable is a setting and travels into the container unchanged,
+which is how the host and the container always agree on where to point and how
+to behave.
+
 ```bash
-export LY_DOCKER_IMAGE=python:3.12       # image to use (default python:3.12)
-ly
+ly -s python:3.12                        # image to use (default python:3.12)
+LY_DOCKER_IMAGE=python:3.12 ly           # the same choice from the environment
 ```
 
-The default image is `python:3.12`, which carries git, make, gcc and curl, so
-the `bash` tool has the usual build tools. Point `LY_DOCKER_IMAGE` at another
-image when you need more; it must provide `python3` at version 3.12 or newer,
-since that is what ly runs on inside it. The startup banner names the image in
-use and both directories, so the container is never a mystery and the host path
-is there to copy into another shell:
+The flag wins over the variable. The default image is `python:3.12`, which
+carries git, make, gcc and curl, so the `bash` tool has the usual build tools.
+Point `--sandbox` or `LY_DOCKER_IMAGE` at another image when you need more; it
+must provide `python3` (or `python`) at version 3.12 or newer, since that is
+what ly runs on inside it. The startup banner names the image in use and both
+directories, so the container is never a mystery and the host path is there to
+copy into another shell:
 
 ```
   • sandboxed docker python:3.12 · /Users/you/ly → /workspace
@@ -141,15 +216,21 @@ A session is ly's record of a conversation. The pieces mirror pi:
 
 ## Long sessions
 
-Compaction kicks in automatically, or on demand with `/compact`. The defaults
-suit a ~200k-token context window:
+Compaction kicks in automatically, or on demand with `/compact`. Its defaults
+(`LY_COMPACT`, `LY_COMPACT_THRESHOLD`, `LY_COMPACT_KEEP_TURNS` and
+`LY_COMPACT_INPUT_TOKENS`, listed above) suit a ~200k-token context window.
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `LY_COMPACT` | `1` | Set to `0` to disable automatic compaction |
-| `LY_COMPACT_THRESHOLD` | `100000` | Estimated tokens in the branch that trigger it |
-| `LY_COMPACT_KEEP_TURNS` | `4` | Recent user turns kept verbatim |
-| `LY_COMPACT_INPUT_TOKENS` | `30000` | Cap per summarization request (longer histories are folded in batches) |
+All four can go in the settings file under a `compaction` object instead,
+where a variable still wins:
+
+```json
+{
+  "compaction": {
+    "threshold_tokens": 32000,
+    "keep_turns": 2
+  }
+}
+```
 
 Lower the threshold when running a smaller-context model. Compaction is
 conservative: if the summary would not be smaller than the turns it replaces

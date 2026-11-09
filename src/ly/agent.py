@@ -71,9 +71,7 @@ class AgentSession:
         self.session_manager = session_manager
         self.system_prompt = system_prompt
         self.cwd = cwd
-        self.compaction = (
-            compaction if compaction is not None else CompactionConfig.from_env()
-        )
+        self.compaction = compaction if compaction is not None else CompactionConfig()
         self.tool_guard = tool_guard if tool_guard is not None else basic_guard(cwd)
         self._subscribers: list[Callable] = []
         # A shared event lets a parent and its sub-agents abort together.

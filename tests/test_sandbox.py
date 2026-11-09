@@ -1,17 +1,19 @@
 """The docker hand-off: the command it builds and when it hands off at all."""
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from ly import sandbox
 from ly.cli import build_parser, main, use_container
+from ly.settings import Settings
 
 
 def options(*argv: str):
     """Parse flags the way `main` does, without running anything."""
-    return build_parser().parse_args(list(argv))
+    return build_parser(Settings.load()).parse_args(list(argv))
 
 
 def _must_not_run(*_args) -> None:
@@ -27,13 +29,52 @@ def test_command_mounts_the_working_directory_and_forwards_argv(tmp_path, monkey
     assert f"{Path.cwd()}:/workspace" in command
     assert command[-7:] == [
         sandbox.DEFAULT_IMAGE,
-        "python3",
-        "-P",
-        "-m",
+        "sh",
+        "-c",
+        sandbox.INTERPRETER,
         "ly",
         "-p",
         "hello",
     ]
+
+
+def test_the_container_falls_back_to_a_plain_python(tmp_path):
+    """Not every image that can run ly names its interpreter `python3`."""
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "python").write_text('#!/bin/sh\necho "$@"\n')
+    (fake / "python").chmod(0o755)
+
+    result = subprocess.run(
+        ["/bin/sh", "-c", sandbox.INTERPRETER, "ly", "-p", "hello"],
+        capture_output=True,
+        text=True,
+        env={"PATH": str(fake)},
+    )
+
+    assert result.stdout.split() == ["-P", "-m", "ly", "-p", "hello"]
+
+
+def test_the_sandbox_flag_names_the_image():
+    assert options("-s", "example/ly:1").image == "example/ly:1"
+    assert options("--sandbox", "example/ly:1").image == "example/ly:1"
+
+
+def test_the_image_defaults_to_the_environment_then_the_builtin(monkeypatch):
+    monkeypatch.delenv("LY_DOCKER_IMAGE", raising=False)
+    assert options().image == sandbox.DEFAULT_IMAGE
+
+    monkeypatch.setenv("LY_DOCKER_IMAGE", "python:3.13")
+    assert options().image == "python:3.13"
+    assert options("-s", "example/ly:1").image == "example/ly:1"
+
+
+def test_command_uses_the_image_it_is_given(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    command = sandbox.docker_command([], image="example/ly:1")
+
+    assert command[-5] == "example/ly:1"
 
 
 def test_command_runs_as_the_host_user_with_a_writable_home(monkeypatch, tmp_path):
@@ -118,9 +159,9 @@ def test_command_runs_the_local_ly_and_keeps_its_sessions(monkeypatch, tmp_path)
 
     assert f"{Path(sandbox.ly.__file__).parent}:/opt/ly/ly:ro" in command
     assert "--env=PYTHONPATH=/opt/ly" in command
-    assert "--env=LY_SESSIONS_DIR=/sessions" in command
-    assert "--env=LY_IN_CONTAINER=1" in command
-    assert f"--env=LY_IMAGE={sandbox.DEFAULT_IMAGE}" in command
+    assert "--env=LY_SB_SESSIONS_DIR=/sessions" in command
+    assert "--env=LY_SB_IN_CONTAINER=1" in command
+    assert f"--env=LY_SB_IMAGE={sandbox.DEFAULT_IMAGE}" in command
 
 
 def test_command_forwards_ly_and_terminal_variables_only(monkeypatch, tmp_path):
@@ -138,47 +179,67 @@ def test_command_forwards_ly_and_terminal_variables_only(monkeypatch, tmp_path):
     assert not any("HOME_UNRELATED" in part for part in command)
 
 
+def test_host_only_switches_are_not_forwarded(monkeypatch):
+    """`LY_DOCKER*` chose what to start; the container has no use for them."""
+    monkeypatch.setenv("LY_DOCKER", "1")
+    monkeypatch.setenv("LY_DOCKER_IMAGE", "python:3.13")
+
+    forwarded = sandbox.forwarded_env()
+
+    assert not any("LY_DOCKER" in part for part in forwarded)
+
+
+def test_container_facts_are_never_forwarded(monkeypatch):
+    """The LY_SB_ prefix means "about this container", so it is set, not passed."""
+    monkeypatch.setenv("LY_SB_IMAGE", "stale/image:1")
+    monkeypatch.setenv("LY_SB_HOST_DIR", "/stale/path")
+
+    forwarded = sandbox.forwarded_env()
+
+    assert not any("LY_SB_" in part for part in forwarded)
+
+
 def test_container_side_does_not_spawn_another_container(monkeypatch):
-    monkeypatch.setenv("LY_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_SB_IN_CONTAINER", "1")
 
     assert sandbox.in_container() is True
     assert use_container(options()) is False
 
 
 def test_container_reports_the_image_it_was_started_with(monkeypatch):
-    monkeypatch.setenv("LY_IMAGE", "docker.io/library/alpine")
+    monkeypatch.setenv("LY_SB_IMAGE", "docker.io/library/alpine")
     assert sandbox.image_name() == "docker.io/library/alpine"
 
-    monkeypatch.delenv("LY_IMAGE")
+    monkeypatch.delenv("LY_SB_IMAGE")
     assert sandbox.image_name() == "unknown"
 
 
 def test_the_host_directory_travels_into_the_container(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("LY_HOST_DIR", raising=False)
+    monkeypatch.delenv("LY_SB_HOST_DIR", raising=False)
 
     command = sandbox.docker_command([])
 
-    assert f"--env=LY_HOST_DIR={tmp_path}" in command
+    assert f"--env=LY_SB_HOST_DIR={tmp_path}" in command
 
 
 def test_host_dir_is_what_the_host_sent(monkeypatch):
-    monkeypatch.setenv("LY_HOST_DIR", "/Users/someone/ly")
+    monkeypatch.setenv("LY_SB_HOST_DIR", "/Users/someone/ly")
     assert sandbox.host_dir() == "/Users/someone/ly"
 
-    monkeypatch.delenv("LY_HOST_DIR")
+    monkeypatch.delenv("LY_SB_HOST_DIR")
     assert sandbox.host_dir() is None
 
 
 def test_the_host_dir_is_not_forwarded_twice(monkeypatch):
     """`forwarded_env` must not echo it back from a host that had one set."""
-    monkeypatch.setenv("LY_HOST_DIR", "/stale/path")
+    monkeypatch.setenv("LY_SB_HOST_DIR", "/stale/path")
 
-    assert "--env=LY_HOST_DIR=/stale/path" not in sandbox.forwarded_env()
+    assert "--env=LY_SB_HOST_DIR=/stale/path" not in sandbox.forwarded_env()
 
 
 def test_hand_off_is_the_default_but_can_be_turned_off(monkeypatch):
-    monkeypatch.delenv("LY_IN_CONTAINER", raising=False)
+    monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
     monkeypatch.delenv("LY_DOCKER", raising=False)
     assert use_container(options()) is True
     assert use_container(options("--nosandbox")) is False
@@ -188,7 +249,7 @@ def test_hand_off_is_the_default_but_can_be_turned_off(monkeypatch):
 
 
 def test_help_and_version_never_start_a_container(monkeypatch, capsys):
-    monkeypatch.delenv("LY_IN_CONTAINER", raising=False)
+    monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
     monkeypatch.delenv("LY_DOCKER", raising=False)
     monkeypatch.setattr(sandbox, "exec_in_docker", _must_not_run)
 
@@ -202,18 +263,39 @@ def test_help_and_version_never_start_a_container(monkeypatch, capsys):
 def test_a_real_run_hands_the_whole_command_line_to_docker(monkeypatch):
     handed_off: list[list[str]] = []
 
-    def record(argv: list[str]) -> None:
-        handed_off.append(argv)
+    def record(argv: list[str], *, image: str) -> None:
+        handed_off.append([image, *argv])
         raise SystemExit(0)
 
-    monkeypatch.delenv("LY_IN_CONTAINER", raising=False)
+    monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
     monkeypatch.delenv("LY_DOCKER", raising=False)
+    monkeypatch.delenv("LY_DOCKER_IMAGE", raising=False)
     monkeypatch.setattr(sandbox, "exec_in_docker", record)
 
     with pytest.raises(SystemExit):
         main(["-p", "hello"])
 
-    assert handed_off == [["-p", "hello"]]
+    assert handed_off == [[sandbox.DEFAULT_IMAGE, "-p", "hello"]]
+
+
+def test_the_sandbox_flag_reaches_docker(monkeypatch):
+    handed_off: list[list[str]] = []
+
+    def record(argv: list[str], *, image: str) -> None:
+        handed_off.append([image, *argv])
+        raise SystemExit(0)
+
+    monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
+    monkeypatch.delenv("LY_DOCKER", raising=False)
+    monkeypatch.delenv("LY_DOCKER_IMAGE", raising=False)
+    monkeypatch.setattr(sandbox, "exec_in_docker", record)
+
+    with pytest.raises(SystemExit):
+        main(["--sandbox", "example/ly:1", "-p", "hello"])
+
+    # The flag is forwarded as well, so the container-side parser still sees
+    # the command line it was given.
+    assert handed_off == [["example/ly:1", "--sandbox", "example/ly:1", "-p", "hello"]]
 
 
 # -- the sessions directory the container mounts -----------------------------

@@ -48,6 +48,7 @@ from .render import (
     summarize_tool_call,
 )
 from .session import SESSIONS_DIR, SessionManager
+from .settings import Settings
 from .spinner import Spinner
 from .theme import BAND, DIM, RESET, SHADE, Theme, get_theme, terminal_width
 from .tools import default_tools
@@ -57,6 +58,7 @@ HELP = """\
 /model [name]      Show or switch the model
 /tools             List active tools
 /system            Show the current system prompt
+/config            Show the settings in effect
 /plain             Toggle Markdown rendering
 /thinking          Toggle streamed model reasoning
 /new               Start a new session
@@ -68,19 +70,18 @@ HELP = """\
 """
 
 
-def _flag(name: str) -> bool | None:
-    """Read a tri-state environment flag; None when the variable is unset."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return None
-    return raw.strip().lower() not in ("0", "false", "no", "off")
+def _reasoning_mode(value: bool | None) -> str:
+    """Name the tri-state reasoning setting; None means the provider decides."""
+    if value is None:
+        return "auto (from base URL)"
+    return "on" if value else "off"
 
 
 def use_container(args: argparse.Namespace) -> bool:
     """Return True when this process should hand off to `docker run` first."""
-    if sandbox.in_container() or args.nosandbox:
-        return False
-    return _flag("LY_DOCKER") is not False
+    # LY_DOCKER is not read here: it reached us through `Settings`, which turned
+    # it into the parser's default for `--nosandbox`.
+    return not (sandbox.in_container() or args.nosandbox)
 
 
 def make_session(args: argparse.Namespace) -> AgentSession:
@@ -88,7 +89,7 @@ def make_session(args: argparse.Namespace) -> AgentSession:
         model=args.model,
         base_url=args.base_url,
         api_key=args.api_key,
-        pass_reasoning_content=_flag("LY_PASS_REASONING_CONTENT"),
+        pass_reasoning_content=args.pass_reasoning_content,
     )
     manager = SessionManager()
     if args.resume:
@@ -104,16 +105,24 @@ def make_session(args: argparse.Namespace) -> AgentSession:
         session_manager=manager,
         system_prompt=build_system_prompt(os.getcwd()),
         cwd=os.getcwd(),
+        compaction=args.compaction,
     )
 
 
 class Repl:
-    def __init__(self, session: AgentSession, theme: Theme | None = None):
+    def __init__(
+        self,
+        session: AgentSession,
+        theme: Theme | None = None,
+        settings: Settings | None = None,
+    ):
         self.session = session
         self.theme = theme if theme is not None else get_theme()
         self.width = terminal_width()
-        self.markdown = True
-        self.show_thinking = True
+        preferences = settings or Settings()
+        self.markdown = preferences.markdown
+        self.show_thinking = preferences.thinking
+        self.api = preferences.api or "chat"
         self.commands = discover(self.session.cwd)
         self._pastes: dict[str, str] = {}
 
@@ -496,6 +505,36 @@ class Repl:
 
     # -- slash commands -------------------------------------------------------------
 
+    def _print_config(self) -> None:
+        """Print the settings in effect, reading live values where they can change.
+
+        The model and the two toggles can be switched mid-session, so they come
+        from the session and this object rather than from the `Settings` that
+        started the run. The API key is reported as set or unset, never printed.
+        """
+        provider = self.session.backend.provider
+        compaction = self.session.compaction
+        if compaction.enabled:
+            trigger = f"on, {compaction.threshold_tokens:,} tokens"
+        else:
+            trigger = "off"
+        rows = [
+            ("model", provider.model),
+            ("base_url", provider.base_url or "unset"),
+            ("api", self.api),
+            ("api key", "set (redacted)" if provider.api_key else "none set"),
+            ("pass reasoning", _reasoning_mode(provider.pass_reasoning_content)),
+            ("markdown", "on" if self.markdown else "off"),
+            ("thinking", "shown" if self.show_thinking else "hidden"),
+            ("sandbox", "container" if sandbox.in_container() else "host"),
+            ("compaction", trigger),
+            ("keep turns", str(compaction.keep_turns)),
+            ("summary cap", f"{compaction.max_summary_input_tokens:,} tokens"),
+        ]
+        width = max(len(label) for label, _ in rows)
+        for label, value in rows:
+            print(f"{self.theme.dim(label.ljust(width) + ':')} {value}")
+
     def _command(self, line: str) -> bool:
         """Handle a slash command. Returns True to exit."""
         parts = line.split(maxsplit=1)
@@ -523,6 +562,8 @@ class Repl:
                 print(f"  {theme.bold(tool.name)}{theme.dim(': ' + first)}")
         elif command == "/system":
             print(self.session.system_prompt)
+        elif command == "/config":
+            self._print_config()
         elif command == "/plain":
             self.markdown = not self.markdown
             state = "on" if self.markdown else "off"
@@ -594,10 +635,31 @@ def print_mode(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """The command line, with `LY_*` variables filled in as argument defaults."""
+def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
+    """The command line.
+
+    Every provider option is a default rather than a flag, filled in by
+    `Settings`, which reads the environment and the settings file and lets the
+    environment win. That is also what the sandbox container sees, so the host
+    and the container cannot disagree.
+
+    Args:
+        settings: Preferences from the settings file and the environment,
+            supplying the defaults for the provider options, the sandbox mode
+            and the image to start.
+    """
+    settings = settings or Settings()
     parser = argparse.ArgumentParser(
         prog="ly", description="A minimal coding agent, modeled after pi"
+    )
+    parser.set_defaults(
+        model=settings.model or "gpt-4.1",
+        base_url=settings.base_url or "",
+        api=settings.api or "chat",
+        api_key=settings.api_key,
+        pass_reasoning_content=settings.pass_reasoning_content,
+        image=settings.image or sandbox.DEFAULT_IMAGE,
+        compaction=settings.compaction,
     )
     parser.add_argument("prompt", nargs="?", help="starting prompt (interactive mode)")
     parser.add_argument(
@@ -607,36 +669,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="print mode: run once, write final response",
     )
     parser.add_argument(
-        "-m",
-        "--model",
-        default=os.environ.get("LY_MODEL") or "gpt-4.1",
-        help="model to use (default: $LY_MODEL or gpt-4.1)",
-    )
-    parser.add_argument(
-        "--base-url",
-        default=os.environ.get("LY_BASE_URL") or "",
-        help="OpenAI-compatible API base URL (default: $LY_BASE_URL)",
-    )
-    parser.add_argument(
-        "--api-key",
-        default=os.environ.get("LY_API_KEY"),
-        help="API key (default: $LY_API_KEY)",
-    )
-    parser.add_argument(
-        "--api",
-        choices=("chat", "responses"),
-        default=os.environ.get("LY_API") or "chat",
-        help="OpenAI endpoint flavour (default: $LY_API or chat); the newest "
-        "models need `responses` to use tools",
-    )
-    parser.add_argument(
         "--resume", type=int, metavar="N", help="resume the n-th recent session"
     )
     parser.add_argument(
         "-ns",
         "--nosandbox",
         action="store_true",
+        default=not settings.sandbox,
         help="run on the host instead of inside a Docker container",
+    )
+    parser.add_argument(
+        "-s",
+        "--sandbox",
+        dest="image",
+        metavar="IMAGE",
+        help=f"Docker image to run ly in (default: {sandbox.DEFAULT_IMAGE})",
     )
     parser.add_argument("--version", action="version", version=f"ly {__version__}")
     return parser
@@ -644,11 +691,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     argv = list(sys.argv[1:] if argv is None else argv)
+    # Read once, here: below this point the values travel as arguments, and the
+    # container only sees them through the mounts and flags.
+    settings = Settings.load()
     # Parse here rather than in the container: `--help`, `--version` and a bad
     # argument all exit during parsing, so none of them starts a container.
-    args = build_parser().parse_args(argv)
+    args = build_parser(settings).parse_args(argv)
     if use_container(args):
-        sandbox.exec_in_docker(argv)
+        sandbox.exec_in_docker(argv, image=args.image)
 
     try:
         if args.print:
@@ -665,7 +715,7 @@ def main(argv: list[str] | None = None) -> None:
         # says why it failed: a refusal is the machine's state, not ly's.
         sys.exit(f"ly: cannot save sessions in {SESSIONS_DIR}: {exc}")
 
-    repl = Repl(session)
+    repl = Repl(session, settings=settings)
     if args.prompt:
         repl._submit(args.prompt)
     repl.run()

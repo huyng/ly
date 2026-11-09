@@ -31,9 +31,7 @@ class MissingCredentialsError(ProviderError):
     """
 
     def __init__(self):
-        super().__init__(
-            "Missing credentials. Set LY_API_KEY or pass --api-key.", retryable=False
-        )
+        super().__init__("Missing credentials. Set LY_API_KEY.", retryable=False)
 
 
 class MissingBaseURLError(ProviderError):

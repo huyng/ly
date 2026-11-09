@@ -15,7 +15,14 @@ from pathlib import Path
 
 from .messages import AgentMessage, deserialize_message, new_id, serialize_message
 
-SESSIONS_DIR = Path(os.environ.get("LY_SESSIONS_DIR", Path.home() / ".ly" / "sessions"))
+# `LY_SB_SESSIONS_DIR` is where the sandbox mounted the host's sessions, so it
+# wins over the preference: the mount, not the setting, decides where the files
+# really are. Spelled out rather than imported, since `sandbox` imports this.
+SESSIONS_DIR = Path(
+    os.environ.get("LY_SB_SESSIONS_DIR")
+    or os.environ.get("LY_SESSIONS_DIR")
+    or Path.home() / ".ly" / "sessions"
+)
 
 # The sessions directory is shared with other tools (notably the full ly CLI),
 # which lay their sessions out as `<cwd-slug>-<hash>/<uuid4>.jsonl` alongside an

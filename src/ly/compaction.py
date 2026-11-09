@@ -16,7 +16,6 @@ Two properties are deliberate:
 """
 
 import json
-import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -71,23 +70,13 @@ Transcript:
 {transcript}"""
 
 
-def _env_int(name: str, default: int) -> int:
-    try:
-        return int(os.environ.get(name) or default)
-    except ValueError:
-        return default
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() not in ("", "0", "false", "no", "off")
-
-
 @dataclass(frozen=True)
 class CompactionConfig:
-    """When and how aggressively to compact the active branch."""
+    """When and how aggressively to compact the active branch.
+
+    Defaults only: `Settings` supplies the values, since it is the one place that
+    reads the environment and `~/.ly/settings.json`.
+    """
 
     enabled: bool = True
     # Estimated tokens in the active branch at which compaction kicks in.
@@ -98,18 +87,6 @@ class CompactionConfig:
     # Upper bound on a single summarization request; longer histories are
     # summarized in batches, each folding in the previous summary.
     max_summary_input_tokens: int = 30_000
-
-    @classmethod
-    def from_env(cls) -> "CompactionConfig":
-        """Config from LY_COMPACT* environment variables, with defaults."""
-        return cls(
-            enabled=_env_bool("LY_COMPACT", True),
-            threshold_tokens=_env_int("LY_COMPACT_THRESHOLD", cls.threshold_tokens),
-            keep_turns=_env_int("LY_COMPACT_KEEP_TURNS", cls.keep_turns),
-            max_summary_input_tokens=_env_int(
-                "LY_COMPACT_INPUT_TOKENS", cls.max_summary_input_tokens
-            ),
-        )
 
 
 def estimate_tokens(messages: list[AgentMessage]) -> int:

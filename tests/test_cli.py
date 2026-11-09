@@ -58,6 +58,41 @@ def make_repl(threshold_tokens: int = 100_000, enabled: bool = True) -> Repl:
     return Repl(session, Theme(enabled=False))
 
 
+def test_config_shows_the_settings_in_effect(capsys):
+    repl = make_repl(threshold_tokens=8000)
+    repl.session.set_model("switched-model")
+    repl.show_thinking = False
+
+    repl._command("/config")
+
+    out = capsys.readouterr().out
+    assert "switched-model" in out  # the live model, not the starting one
+    assert "8,000 tokens" in out
+    assert "thinking" in out and "hidden" in out
+    assert "fake" in out  # the base URL
+
+
+def test_config_never_prints_the_api_key(capsys):
+    repl = make_repl()
+    repl.session.backend.provider.api_key = "sk-secret-1234"
+
+    repl._command("/config")
+
+    out = capsys.readouterr().out
+    assert "sk-secret-1234" not in out
+    assert "api key" in out and "set (redacted)" in out
+
+
+def test_config_says_when_no_api_key_is_set(capsys):
+    repl = make_repl()
+    repl.session.backend.provider.api_key = ""
+
+    repl._command("/config")
+
+    out = capsys.readouterr().out
+    assert "none set" in out
+
+
 def test_a_retry_finishes_the_reasoning_frame_before_starting_another(capsys):
     """A retry re-enters at MessageStart; its frame must not stack on the first."""
     repl = make_repl()
@@ -128,8 +163,8 @@ def test_status_line_omits_the_threshold_when_compaction_is_disabled(capsys):
 
 def test_banner_names_the_container_image(capsys, monkeypatch):
     repl = make_repl()
-    monkeypatch.setenv("LY_IN_CONTAINER", "1")
-    monkeypatch.setenv("LY_IMAGE", "example/image:1")
+    monkeypatch.setenv("LY_SB_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_SB_IMAGE", "example/image:1")
     monkeypatch.setattr(repl, "_read", lambda prompt: None)
 
     repl.run()
@@ -140,9 +175,9 @@ def test_banner_names_the_container_image(capsys, monkeypatch):
 def test_banner_names_the_host_directory_that_was_mounted(capsys, monkeypatch):
     repl = make_repl()
     repl.session.cwd = "/workspace"
-    monkeypatch.setenv("LY_IN_CONTAINER", "1")
-    monkeypatch.setenv("LY_IMAGE", "example/image:1")
-    monkeypatch.setenv("LY_HOST_DIR", "/Users/someone/ly")
+    monkeypatch.setenv("LY_SB_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_SB_IMAGE", "example/image:1")
+    monkeypatch.setenv("LY_SB_HOST_DIR", "/Users/someone/ly")
     monkeypatch.setattr(repl, "_read", lambda prompt: None)
 
     repl.run()
@@ -154,9 +189,9 @@ def test_banner_names_the_host_directory_that_was_mounted(capsys, monkeypatch):
 def test_banner_copes_when_the_host_directory_is_unknown(capsys, monkeypatch):
     repl = make_repl()
     repl.session.cwd = "/workspace"
-    monkeypatch.setenv("LY_IN_CONTAINER", "1")
-    monkeypatch.setenv("LY_IMAGE", "example/image:1")
-    monkeypatch.delenv("LY_HOST_DIR", raising=False)
+    monkeypatch.setenv("LY_SB_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_SB_IMAGE", "example/image:1")
+    monkeypatch.delenv("LY_SB_HOST_DIR", raising=False)
     monkeypatch.setattr(repl, "_read", lambda prompt: None)
 
     repl.run()
@@ -168,7 +203,7 @@ def test_banner_copes_when_the_host_directory_is_unknown(capsys, monkeypatch):
 
 def test_banner_stays_quiet_on_the_host(capsys, monkeypatch):
     repl = make_repl()
-    monkeypatch.delenv("LY_IN_CONTAINER", raising=False)
+    monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
     monkeypatch.setattr(repl, "_read", lambda prompt: None)
 
     repl.run()
@@ -179,8 +214,8 @@ def test_banner_stays_quiet_on_the_host(capsys, monkeypatch):
 def test_print_mode_says_it_is_in_docker_on_stderr(monkeypatch, capsys):
     from ly.cli import print_mode
 
-    monkeypatch.setenv("LY_IN_CONTAINER", "1")
-    monkeypatch.setenv("LY_IMAGE", "example/image:1")
+    monkeypatch.setenv("LY_SB_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_SB_IMAGE", "example/image:1")
 
     def no_session(_args):
         raise SystemExit(0)
@@ -197,13 +232,14 @@ def test_print_mode_says_it_is_in_docker_on_stderr(monkeypatch, capsys):
 
 def test_env_variables_become_argument_defaults(monkeypatch):
     from ly.cli import build_parser
+    from ly.settings import Settings
 
     monkeypatch.setenv("LY_MODEL", "deepseek-flash")
     monkeypatch.setenv("LY_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("LY_API_KEY", "env-key")
     monkeypatch.setenv("LY_API", "responses")
 
-    args = build_parser().parse_args([])
+    args = build_parser(Settings.load()).parse_args([])
 
     assert args.model == "deepseek-flash"
     assert args.base_url == "https://api.deepseek.com"
@@ -211,31 +247,17 @@ def test_env_variables_become_argument_defaults(monkeypatch):
     assert args.api == "responses"
 
 
-def test_flags_override_env_variables(monkeypatch):
+def test_no_provider_options_are_flags(monkeypatch):
     from ly.cli import build_parser
+    from ly.settings import Settings
 
-    monkeypatch.setenv("LY_BASE_URL", "https://env.example/v1")
     monkeypatch.setenv("LY_API_KEY", "env-key")
 
-    args = build_parser().parse_args(
-        ["--base-url", "https://flag.example/v1", "--api-key", "flag-key"]
-    )
+    assert build_parser(Settings.load()).parse_args([]).api_key == "env-key"
 
-    assert args.base_url == "https://flag.example/v1"
-    assert args.api_key == "flag-key"
-
-
-def test_pass_reasoning_content_env_flag_is_tri_state(monkeypatch):
-    from ly.cli import _flag
-
-    monkeypatch.delenv("LY_PASS_REASONING_CONTENT", raising=False)
-    assert _flag("LY_PASS_REASONING_CONTENT") is None
-
-    monkeypatch.setenv("LY_PASS_REASONING_CONTENT", "yes")
-    assert _flag("LY_PASS_REASONING_CONTENT") is True
-
-    monkeypatch.setenv("LY_PASS_REASONING_CONTENT", "off")
-    assert _flag("LY_PASS_REASONING_CONTENT") is False
+    for flag in ("--model", "--base-url", "--api", "--api-key"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args([flag, "x"])
 
 
 def test_a_sessions_directory_that_cannot_be_written_is_explained(monkeypatch):
@@ -243,7 +265,7 @@ def test_a_sessions_directory_that_cannot_be_written_is_explained(monkeypatch):
     from ly.cli import main
     from ly.session import SessionManager
 
-    monkeypatch.setenv("LY_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_SB_IN_CONTAINER", "1")
     monkeypatch.setenv("LY_BASE_URL", "https://x/v1")
     monkeypatch.setenv("LY_API_KEY", "test")
 

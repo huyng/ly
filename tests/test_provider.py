@@ -573,7 +573,7 @@ def test_missing_base_url_raises_at_construction():
 def test_missing_credentials_raise_at_construction(base_url):
     with pytest.raises(MissingCredentialsError) as exc:
         Provider(base_url=base_url)
-    assert str(exc.value) == "Missing credentials. Set LY_API_KEY or pass --api-key."
+    assert str(exc.value) == "Missing credentials. Set LY_API_KEY."
 
 
 def test_abort_mid_stream_closes_reader_and_reports_aborted():

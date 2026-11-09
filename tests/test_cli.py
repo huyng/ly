@@ -20,6 +20,7 @@ from ly.messages import (
     ToolCall,
     ToolResultMessage,
     Usage,
+    UserMessage,
 )
 from ly.providers import Provider
 from ly.providers.backend import ModelBackend
@@ -91,6 +92,76 @@ def test_config_says_when_no_api_key_is_set(capsys):
 
     out = capsys.readouterr().out
     assert "none set" in out
+
+
+def sessions_repl(monkeypatch, tmp_path, *prompts) -> Repl:
+    """A REPL whose `/sessions` listing is exactly the files in `tmp_path`."""
+    monkeypatch.setattr("ly.session.SESSIONS_DIR", tmp_path)
+    manager = SessionManager(directory=tmp_path)
+    manager.new_session()
+    for prompt in prompts:
+        manager.append(UserMessage(prompt))
+    session = AgentSession(
+        backend=ScriptedBackend(),
+        tools=[],
+        session_manager=manager,
+        system_prompt="system",
+    )
+    return Repl(session, Theme(enabled=False))
+
+
+def test_sessions_lists_each_by_its_hash_and_last_prompt(monkeypatch, capsys, tmp_path):
+    repl = sessions_repl(
+        monkeypatch, tmp_path, "an old prompt", "fix the failing tests"
+    )
+
+    repl._command("/sessions")
+
+    out = capsys.readouterr().out
+    assert repl.session.session_manager.file is not None
+    stem = repl.session.session_manager.file.stem
+    assert stem in out  # the id, as /resume would need it
+    assert "fix the failing tests" in out
+    assert "an old prompt" not in out
+    # Hash, then when it was last used, then what it is about.
+    assert out.index(stem) < out.index("20") < out.index("fix the failing tests")
+
+
+def test_sessions_synopsis_fits_a_narrow_terminal(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr("ly.cli.terminal_width", lambda: 60)
+    repl = sessions_repl(monkeypatch, tmp_path, "fix " * 40)
+
+    repl._command("/sessions")
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines and lines[0].endswith("…")
+    # A wrapped row would be two lines, so one short line is the whole check.
+    assert all(len(line) <= 60 for line in lines)
+
+
+def test_sessions_synopsis_stays_short_on_a_wide_terminal(
+    monkeypatch, capsys, tmp_path
+):
+    monkeypatch.setattr("ly.cli.terminal_width", lambda: 300)
+    repl = sessions_repl(monkeypatch, tmp_path, "fix " * 40)
+
+    repl._command("/sessions")
+
+    (line,) = capsys.readouterr().out.splitlines()
+    assert line.endswith("…")
+    assert len(line) < 100  # SYNOPSIS_CHARS, not the whole 300-column row
+
+
+def test_sessions_survives_a_terminal_narrower_than_the_row(
+    monkeypatch, capsys, tmp_path
+):
+    # The id and timestamp alone are wider than this, so the synopsis gets nothing.
+    monkeypatch.setattr("ly.cli.terminal_width", lambda: 20)
+    repl = sessions_repl(monkeypatch, tmp_path, "fix the failing tests")
+
+    repl._command("/sessions")
+
+    assert "fix" not in capsys.readouterr().out
 
 
 def test_a_retry_finishes_the_reasoning_frame_before_starting_another(capsys):

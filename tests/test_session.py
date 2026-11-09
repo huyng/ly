@@ -176,6 +176,42 @@ def test_load_skips_malformed_lines(tmp_path):
     assert branch[0].content == "hello"
 
 
+def test_synopsis_is_the_last_prompt_on_one_line(tmp_path):
+    manager = SessionManager(directory=tmp_path)
+    manager.new_session()
+    manager.append(UserMessage("an old prompt"))
+    manager.append(UserMessage("  fix the\n  failing tests "))
+    assert manager.file is not None
+
+    assert SessionManager.synopsis(manager.file) == "fix the failing tests"
+
+
+def test_synopsis_is_cut_short_with_an_ellipsis(tmp_path):
+    manager = SessionManager(directory=tmp_path)
+    manager.new_session()
+    manager.append(UserMessage("word " * 100))
+    assert manager.file is not None
+
+    synopsis = SessionManager.synopsis(manager.file)
+
+    assert len(synopsis) <= 60
+    assert synopsis.endswith("…")
+
+
+def test_synopsis_skips_damaged_lines_and_files_without_prompts(tmp_path):
+    manager = SessionManager(directory=tmp_path)
+    manager.new_session()
+    manager.append(UserMessage("kept"))
+    assert manager.file is not None
+    with open(manager.file, "a", encoding="utf-8") as f:
+        f.write('{"id": "truncated"\n')
+    empty = touch(tmp_path / "2026-10-20" / "00aa00aa00aa.jsonl")
+
+    assert SessionManager.synopsis(manager.file) == "kept"
+    assert SessionManager.synopsis(empty) == "(no prompt)"
+    assert SessionManager.synopsis(tmp_path / "missing.jsonl") == "(no prompt)"
+
+
 def test_load_stops_at_dangling_current_pointer(tmp_path):
     manager = SessionManager(directory=tmp_path)
     manager.new_session()

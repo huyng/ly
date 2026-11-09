@@ -47,7 +47,7 @@ from .render import (
     render_tool_result,
     summarize_tool_call,
 )
-from .session import SESSIONS_DIR, SessionManager
+from .session import SESSIONS_DIR, SYNOPSIS_CHARS, SessionManager
 from .settings import Settings
 from .spinner import Spinner
 from .theme import BAND, DIM, RESET, SHADE, Theme, get_theme, terminal_width
@@ -62,7 +62,7 @@ HELP = """\
 /plain             Toggle Markdown rendering
 /thinking          Toggle streamed model reasoning
 /new               Start a new session
-/sessions          List recent sessions
+/sessions          List recent sessions by their last prompt
 /resume <n>        Resume the n-th session from /sessions
 /compact           Summarize old turns now (automatic near the limit)
 /<name> [args]     Run a command defined in .agents/commands (listed below)
@@ -576,12 +576,21 @@ class Repl:
             self.session.session_manager.new_session()
             print(theme.dim(f"new session: {self.session.session_manager.file}"))
         elif command == "/sessions":
+            width = terminal_width()
             for i, path in enumerate(SessionManager.list_sessions(), 1):
                 marker = "→" if path == self.session.session_manager.file else " "
-                marker = theme.accent(marker)
                 stamp = datetime.fromtimestamp(path.stat().st_mtime)
                 when = stamp.strftime("%Y-%m-%d %H:%M")
-                print(f"{marker} {i}. {path.stem}  {theme.dim(when)}")
+                # Measure the row unstyled: styles add no width, and the synopsis
+                # only gets what the terminal has left, so it cannot wrap onto a
+                # second line. SYNOPSIS_CHARS still caps it on a wide window.
+                head = f"{marker} {i}. {path.stem}  {when}  "
+                room = min(SYNOPSIS_CHARS, width - len(head))
+                synopsis = SessionManager.synopsis(path, chars=room)
+                styled_head = (
+                    f"{theme.accent(marker)} {i}. {path.stem}  {theme.dim(when)}  "
+                )
+                print(f"{styled_head}{theme.bold(synopsis)}")
         elif command == "/resume":
             if not arg.isdigit():
                 print("usage: /resume <n>")

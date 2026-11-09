@@ -9,6 +9,7 @@ last pointer in the file matters, which keeps the format append-only.
 import json
 import os
 import re
+import textwrap
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,11 @@ SESSIONS_DIR = Path(
 # load as an empty session, so it must not show up in the listing.
 SESSION_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 DATE_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+#: How much of a session's last prompt `/sessions` shows.
+SYNOPSIS_CHARS = 60
+#: What a session file with no readable prompt is called in the listing.
+NO_PROMPT = "(no prompt)"
 
 
 class SessionManager:
@@ -117,6 +123,44 @@ class SessionManager:
             and SESSION_ID_RE.match(p.stem)
         ]
         return sorted(sessions, key=lambda p: p.stat().st_mtime, reverse=True)
+
+    @staticmethod
+    def synopsis(path: Path, chars: int = SYNOPSIS_CHARS) -> str:
+        """A one-line summary of the last prompt in a session file.
+
+        The listing is more useful when it says what a session is about right
+        now than how it started. Reading backwards makes that the cheap end to
+        start from; damaged lines are skipped for the same reason `load` skips
+        them: a session killed mid-write must still be listed.
+
+        Args:
+            path: A session JSONL file.
+            chars: Longest result to return, default `SYNOPSIS_CHARS`. Callers
+                pass the room a narrow terminal has left, though the text is cut
+                on a word boundary, so the result is usually shorter.
+
+        Returns:
+            The last user prompt written to the file, whitespace collapsed to
+            one line and cut to `chars`, or `NO_PROMPT` when the file holds no
+            prompt or cannot be read.
+        """
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return NO_PROMPT
+
+        for line in reversed(lines):
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            message = data.get("message") if isinstance(data, dict) else None
+            if not isinstance(message, dict) or message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return textwrap.shorten(content, max(chars, 1), placeholder="…")
+        return NO_PROMPT
 
     # -- writes ----------------------------------------------------------------
 

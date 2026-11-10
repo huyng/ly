@@ -59,6 +59,24 @@ from .spinner import Spinner
 from .theme import BAND, DIM, RESET, SHADE, Theme, get_theme, terminal_width
 from .tools import default_tools
 
+#: Built-in slash commands, for Tab completion. Prose lives in `HELP`; keep
+#: the two in step when adding one.
+COMMANDS = (
+    "/help",
+    "/model",
+    "/tools",
+    "/system",
+    "/config",
+    "/plain",
+    "/thinking",
+    "/new",
+    "/sessions",
+    "/resume",
+    "/compact",
+    "/quit",
+    "/exit",
+)
+
 HELP = """\
 /help              Show this help
 /model [ref]       Show the model, or switch to `provider/model`
@@ -399,21 +417,30 @@ class Repl:
         print(row(" "))  # and one below
         print()  # an unpainted line closes the band
 
-    def _completions(self, line: str) -> list[str]:
-        """Candidates for the model reference in a `/model` line.
+    def _command_names(self) -> list[str]:
+        """Every slash command Tab can offer, built in and from Markdown."""
+        return sorted(set(COMMANDS) | {f"/{name}" for name in self.commands})
 
-        Only the first word after the command is a reference, so a line that
-        already has two completes nothing rather than inserting a second one.
+    def _completions(self, line: str) -> list[str]:
+        """Full-line candidates for what has been typed so far.
+
+        A line is completed in two places: the command name itself, and the
+        argument of `/model`. Nothing else has an argument worth guessing, so
+        a space elsewhere ends completion rather than offering a filename.
 
         Args:
             line: The text typed so far, as readline reports it.
 
         Returns:
-            Matching references, provider prefixes first, or an empty list
-            when the cursor is not on a `/model` argument.
+            Whole lines that begin with `line`, so the caller only has to drop
+            the part already typed. Empty when nothing can be completed.
         """
-        argument = line.removeprefix("/model ")
-        if argument == line or len(argument.split()) > 1:
+        if not line.startswith("/"):
+            return []
+        command, space, argument = line.partition(" ")
+        if not space:
+            return [name for name in self._command_names() if name.startswith(line)]
+        if command != "/model" or len(argument.split()) > 1:
             return []
         name, slash, _ = argument.partition("/")
         if not slash:
@@ -425,7 +452,8 @@ class Repl:
             preset = self.settings.presets.get(name)
             options = [f"{name}/{model}" for model in preset.models] if preset else []
         options += [model for model in self._models if model not in options]
-        return [option for option in options if option.startswith(argument)]
+        lines = [f"{command} {option}" for option in options]
+        return [candidate for candidate in lines if candidate.startswith(line)]
 
     def _complete(self, text: str, state: int) -> str | None:
         """Readline's completion protocol: one candidate per call.
@@ -433,19 +461,12 @@ class Repl:
         A candidate replaces only the word being completed, and the two
         readlines disagree about where a word starts: GNU readline treats
         `deepseek/deepseek-r` as one word, libedit breaks on the slash and
-        completes just `deepseek-r`. The typed part before that word is kept
-        and only the rest is offered, so the reference is not doubled.
+        completes just `deepseek-r`. The line up to the word is kept and only
+        the rest of the candidate is offered, so nothing is doubled.
         """
         line = readline.get_line_buffer()
         start = len(line) - len(text) if line.endswith(text) else len(line)
-        typed = line[len("/model ") : start]
-        if not line.startswith("/model "):
-            typed = ""
-        options = [
-            option[len(typed) :]
-            for option in self._completions(line)
-            if option.startswith(typed)
-        ]
+        options = [option[start:] for option in self._completions(line)]
         return options[state] if state < len(options) else None
 
     def _read(self, prompt: str) -> str | None:

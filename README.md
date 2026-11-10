@@ -156,10 +156,10 @@ LY_MODEL=deepseek/deepseek-flash ly # one run, one model
 `/model deepseek/deepseek-flash` switches mid-session, keeping the transcript.
 The endpoint, the key, the wire format and the model all move together,
 because they are one provider's facts rather than four settings you have to
-keep in step. `/model` alone prints what is in force. Tab completes the
-provider, then that provider's models, then any reference this session has
-already used. The model list is a hand-written guide in `ly/presets.py`, not a
-gate: `/model` sends whatever you type.
+keep in step. `/model` alone prints what is in force. Tab completes
+slash commands, then for `/model` the provider, that provider's models, and any
+reference this session has already used. The model list is a hand-written guide
+in `ly/presets.py`, not a gate: `/model` sends whatever you type.
 
 ```bash
 ly> /model deepseek/deepseek-flash  # endpoint, key and model at once

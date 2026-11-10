@@ -235,6 +235,45 @@ print('RESULT=' + json.dumps(text), flush=True)
         os.close(fd)
 
 
+def test_terminal_tab_completes_a_slash_command():
+    code = """
+import json
+from ly.cli import Repl
+repl = Repl.__new__(Repl)
+repl._pastes = {}
+repl.commands = {}
+repl.settings = None
+text = repl._read('PROMPT> ')
+print('RESULT=' + json.dumps(text), flush=True)
+"""
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.environ["TERM"] = "xterm-256color"
+        os.execv(sys.executable, [sys.executable, "-c", code])
+
+    output = bytearray()
+
+    def until(marker: bytes) -> None:
+        while marker not in output:
+            assert select.select([fd], [], [], 5)[0], bytes(output)
+            chunk = os.read(fd, 65536)
+            assert chunk, bytes(output)
+            output.extend(chunk)
+
+    try:
+        until(b"PROMPT> ")
+        os.write(fd, b"/mod\t")
+        until(b"/model")
+        os.write(fd, b"\r")
+        until(b"RESULT=")
+        result = bytes(output).split(b"RESULT=", 1)[1].splitlines()[0]
+        assert json.loads(result) == "/model"
+    finally:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        os.close(fd)
+
+
 def test_terminal_ctrl_a_and_ctrl_e_with_colored_prompt():
     code = """
 import json

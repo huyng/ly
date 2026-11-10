@@ -27,6 +27,8 @@ from ly.messages import (
 from ly.providers import Provider
 from ly.providers.backend import ModelBackend, ResponsesBackend
 from ly.session import SessionManager
+from ly.cli import COMMANDS
+from ly.commands import Command
 from ly.theme import Theme
 
 
@@ -66,11 +68,11 @@ def test_tab_completes_the_provider_half_of_a_model():
 
     # The reference in use leads the candidates, so Enter on it keeps it.
     assert repl._completions("/model ") == [
-        "deepseek/",
-        "openai/",
-        "openai/gpt-4.1",
+        "/model deepseek/",
+        "/model openai/",
+        "/model openai/gpt-4.1",
     ]
-    assert repl._completions("/model de") == ["deepseek/"]
+    assert repl._completions("/model de") == ["/model deepseek/"]
     assert repl._completions("/model x") == []
 
 
@@ -78,11 +80,11 @@ def test_tab_completes_the_models_a_provider_lists():
     repl = make_repl()
 
     assert repl._completions("/model deepseek/") == [
-        "deepseek/deepseek-chat",
-        "deepseek/deepseek-reasoner",
+        "/model deepseek/deepseek-chat",
+        "/model deepseek/deepseek-reasoner",
     ]
     assert repl._completions("/model deepseek/deepseek-r") == [
-        "deepseek/deepseek-reasoner"
+        "/model deepseek/deepseek-reasoner"
     ]
 
 
@@ -93,8 +95,8 @@ def test_tab_offers_a_reference_this_session_used():
     repl._models.append("deepseek/deepseek-coder")
 
     assert repl._completions("/model deepseek/deepseek-c") == [
-        "deepseek/deepseek-chat",
-        "deepseek/deepseek-coder",
+        "/model deepseek/deepseek-chat",
+        "/model deepseek/deepseek-coder",
     ]
 
 
@@ -104,7 +106,7 @@ def test_tab_is_quiet_outside_a_model_reference():
 
     # Nothing after a complete reference: the line is done, not half-typed.
     assert repl._completions("/model deepseek/deepseek-chat ") == []
-    assert repl._completions("/config") == []
+    assert repl._completions("/config ") == []
     assert repl._completions("explain this") == []
 
 
@@ -116,8 +118,33 @@ def test_switching_model_remembers_the_reference_for_tab(monkeypatch, capsys):
 
     assert repl._models == ["openai/gpt-4.1", "deepseek/deepseek-chat"]
     assert repl._completions("/model deepseek/deepseek-chat") == [
-        "deepseek/deepseek-chat"
+        "/model deepseek/deepseek-chat"
     ]
+
+
+def test_tab_lists_the_slash_commands():
+    repl = make_repl()
+
+    assert repl._completions("/co") == ["/compact", "/config"]
+    # Markdown commands from this machine join the list, so only check that
+    # every built-in is offered, not that they are the whole answer.
+    assert set(COMMANDS) <= set(repl._completions("/"))
+
+
+def test_tab_lists_markdown_commands_too():
+    repl = make_repl()
+    repl.commands = {"review": Command(name="review", path="", text="# Review")}
+
+    assert repl._completions("/rev") == ["/review"]
+
+
+def test_tab_completes_a_command_name_from_a_bare_slash():
+    """Libedit breaks the word at `/`, so the whole command name is the
+    replacement only after the slash is accounted for."""
+    repl = make_repl()
+
+    assert complete_at(repl, "/mo", "mo") == ["/model"]
+    assert complete_at(repl, "/mo", "/mo") == ["/model"]
 
 
 def complete_at(repl, line, text):

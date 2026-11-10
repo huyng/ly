@@ -90,7 +90,7 @@ def make_session(workspace, turns):
     session = AgentSession(
         backend=backend,
         tools=default_tools(cwd=str(workspace)),
-        session_manager=SessionManager(in_memory=True),
+        session_manager=SessionManager(),
         system_prompt="parent prompt",
         cwd=str(workspace),
     )

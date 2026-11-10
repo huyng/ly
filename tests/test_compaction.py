@@ -125,7 +125,7 @@ def make_session(
     session = AgentSession(
         backend=backend,
         tools=[],
-        session_manager=SessionManager(in_memory=True),
+        session_manager=SessionManager(),
         system_prompt="sys",
         compaction=config,
     )

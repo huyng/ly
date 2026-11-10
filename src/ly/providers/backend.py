@@ -2,9 +2,9 @@
 
 All backends share one contract: `stream_response` takes the transcript, yields events,
 and returns the AssistantMessage. What to talk to — model, endpoint, key,
-timeout — arrives as a `Provider` given to the constructor, and each request
-reads it fresh, so `provider.model = ...` takes effect on the next request
-rather than being shadowed by a copy taken at construction.
+wire format, timeout — arrives as a `Provider` given to the constructor, and
+each request reads it fresh, so `provider.model = ...` takes effect on the next
+request rather than being shadowed by a copy taken at construction.
 
 - `ChatCompletionsBackend` — `/chat/completions`, the default, and the only
   flavour DeepSeek, z.ai and the rest of the OpenAI-compatible world speak.
@@ -618,19 +618,20 @@ def _as_int(value: Any) -> int:
 
 
 def make_backend(
-    provider: Provider, api: str | None = None, reader: type[StreamReader] | None = None
+    provider: Provider, reader: type[StreamReader] | None = None
 ) -> ModelBackend:
-    """Build the backend that speaks `api`, defaulting to chat-completions.
+    """Build the backend that speaks the provider's wire format.
 
     Args:
-        provider: The endpoint, credentials and model to read on each request.
-        api: Wire format to speak; unknown names are treated as chat-completions
-            so a blank flag picks the common flavour.
+        provider: The endpoint, credentials, model and wire format to read on
+            each request. `provider.api` picks the backend; unknown names are
+            treated as chat-completions, so a blank value picks the common
+            flavour.
         reader: Stand-in for the HTTP layer, for tests.
 
     Returns:
         A backend bound to `provider`.
     """
-    if (api or "chat").strip().lower() == "responses":
+    if provider.api == "responses":
         return ResponsesBackend(provider, reader)
     return ChatCompletionsBackend(provider, reader)

@@ -16,12 +16,25 @@ Requires Python 3.12+. There are no runtime dependencies — installation pulls 
 uv tool install git+https://github.com/huyng/ly
 ```
 
-Point ly to an LLM provider by setting environment variables. It is compatible with any OpenAI-API compatible endpoint.
+A model is always written `provider/model`. The provider half names a preset,
+and a preset knows the endpoint, the wire format and which variable its key
+hides in, so the only thing you supply is the key. DeepSeek and OpenAI are
+built in; any other OpenAI-compatible endpoint can be named by hand.
 
 ```bash
-export LY_API_KEY=sk-             # API key for the selected provider
-export LY_MODEL=gpt-4.1           # The model you would like to use
-export LY_BASE_URL=
+export LY_MODEL=deepseek/deepseek-flash
+export DEEPSEEK_API_KEY=sk-       # or LY_API_KEY for either
+```
+
+With one generic key and nothing else, ly asks OpenAI for `gpt-4.1`:
+
+```bash
+export LY_API_KEY=sk-
+```
+
+```bash
+export LY_MODEL=mygateway/house-model   # your own endpoint, see Settings file
+export LY_BASE_URL=https://gw.internal/v1
 ```
 
 ### Environment variables
@@ -31,9 +44,9 @@ one exists. These are read by `ly` itself:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `LY_API_KEY` | — | API key for the provider (required) |
-| `LY_BASE_URL` | — | OpenAI-compatible base URL, such as `https://api.openai.com/v1` (required) |
-| `LY_MODEL` | `gpt-4.1` | Model to ask for |
+| `LY_MODEL` | `openai/gpt-4.1` | Model to ask for, always as `provider/model`; the provider names a preset that supplies the endpoint |
+| `LY_API_KEY` | — | API key for the provider (required, unless the preset's own variable is set) |
+| `LY_BASE_URL` | from the preset | OpenAI-compatible base URL, such as `https://api.openai.com/v1` |
 | `LY_API` | `chat` | Wire format: `chat` for `/chat/completions`, `responses` for `/responses` |
 | `LY_PASS_REASONING_CONTENT` | on when the base URL contains `deepseek` | Echo `reasoning_content` back on tool calls, which DeepSeek requires. `0`, `false`, `no` or `off` turns it off |
 | `LY_DOCKER` | `1` | Set to `0` to run on the host instead of in Docker (same as `--nosandbox`) |
@@ -52,6 +65,12 @@ Styling also follows the usual terminal variables:
 | `FORCE_COLOR` | unset | Any value forces styling, unless `NO_COLOR` is also set |
 | `TERM` | from the shell | `dumb` disables styling |
 
+A preset may also read its key from its own variable, which is how switching
+providers does not mean re-exporting one generic key: `OPENAI_API_KEY` for
+`openai`, `DEEPSEEK_API_KEY` for `deepseek`. `LY_API_KEY` wins over both. Under
+`--sandbox` the selected provider's variable is forwarded by name, since the
+container cannot guess which one you used.
+
 `LY_SB_*` variables are set by the host for the copy of ly inside the
 container and are not meant to be set by hand; see
 [Sandboxing with Docker](#sandboxing-with-docker).
@@ -64,7 +83,7 @@ defaults, so a typo cannot stop `ly` from starting.
 
 ```json
 {
-  "model": "gpt-4.1",
+  "model": "deepseek/deepseek-flash",
   "base_url": "https://api.openai.com/v1",
   "api": "chat",
   "markdown": true,
@@ -75,28 +94,74 @@ defaults, so a typo cannot stop `ly` from starting.
 ```
 
 An `LY_*` variable beats this file, which beats the built-in default:
-`LY_MODEL=deepseek-chat ly` overrides `"model"` here for one run. The
+`LY_MODEL=openai/gpt-4.1 ly` overrides `"model"` here for one run. The
 environment is read in one place, `ly/settings.py`, which is also where the
 file is read, so there is a single answer to "where did this value come
 from?". `sandbox: false` is the same as `LY_DOCKER=0` or passing
 `--nosandbox` every time, `markdown` and `thinking` set the starting state of
-`/plain` and `/thinking`, and `api` must be `chat` or `responses`. The
-provider options have no command-line flags: they come from `LY_*` and this
-file only, so the host and the sandbox cannot disagree about which endpoint
-they are talking to. Unknown keys and values of the wrong type are ignored
-one at a time. The API key is not read from this file; keep it in
-`LY_API_KEY`. The Docker image is not read from it either: use `--sandbox`
-or `LY_DOCKER_IMAGE`. Run `/config` to see the values actually in effect.
+`/plain` and `/thinking`, and `api` must be `chat` or `responses`. Anything
+unset falls back to the preset the model names. No provider setting is a
+command-line flag, so the host and the container read the same values and
+cannot disagree about which endpoint they are talking to; for one run, export
+`LY_MODEL`. Unknown keys and values of the wrong type are ignored one at a
+time. The API key is not read from this file; keep it in `LY_API_KEY` or the
+provider's own variable. The Docker image is not read from it either: use
+`--sandbox` or `LY_DOCKER_IMAGE`. Run `/config` to see the values actually in
+effect.
+
+Define more providers under `providers`, then name one in the model:
+
+```json
+{
+  "model": "mygateway/house-model",
+  "providers": {
+    "mygateway": {
+      "base_url": "https://gw.internal/v1",
+      "api": "chat",
+      "key_env": ["MYGW_API_KEY"]
+    }
+  }
+}
+```
+
+An entry merges over the built-in provider of the same name, so routing
+`openai` through a proxy is one key and its key variable stays as it was:
+
+```json
+{ "providers": { "openai": { "base_url": "https://proxy.example.com/v1" } } }
+```
 
 ## Use
 
 ```bash
-ly                                # interactive REPL in the current directory
-ly "fix the failing tests"        # start with an initial prompt
-ly -p "what does this repo do?"   # print mode: run once, write final response
-ly --resume 2                     # resume a previous session
-ly -s python:3.12                 # run in the named Docker image
+ly                                 # interactive REPL in the current directory
+ly "fix the failing tests"         # start with an initial prompt
+ly -p "what does this repo do?"    # print mode: run once, write final response
+ly --resume 2                      # resume a previous session
+ly -s python:3.12                  # run in the named Docker image
+LY_MODEL=deepseek/deepseek-flash ly # one run, one model
 ```
+
+### Switching models and providers
+
+`/model deepseek/deepseek-flash` switches mid-session, keeping the transcript.
+The endpoint, the key, the wire format and the model all move together,
+because they are one provider's facts rather than four settings you have to
+keep in step. `/model` alone prints what is in force.
+
+```bash
+ly> /model deepseek/deepseek-flash  # endpoint, key and model at once
+model: deepseek/deepseek-flash
+ly> /model deepseek/deepseek-reasoner  # same provider, another model
+ly> /model openai/gpt-4.1          # another provider, and its key variable
+```
+
+Only the first slash separates, so a model whose own name has one
+(`openai/moonshotai/kimi-k2`) keeps it. A bare model is refused rather than
+sent somewhere it may not belong: nothing names the endpoint, and a name from
+one provider's catalogue is meaningless at another's. A switch survives only
+for the run: `/new` does not change it, but the next `ly` starts from
+`LY_MODEL` and the settings file again.
 
 ### Custom slash commands
 
@@ -292,6 +357,7 @@ src/ly/
 ├── events.py      # session lifecycle events
 ├── messages.py    # message types (user, assistant, toolResult)
 ├── policy.py      # guard for tool calls (path escapes, obvious accidents)
+├── presets.py     # built-in providers, and the `provider/model` split
 ├── prompts.py     # system prompt + AGENTS.md discovery (cwd and ~/.agents)
 ├── providers/     # model backends
 │   ├── sse.py     # StreamReader: one POST, urllib + SSE, decoded into chunks

@@ -1,11 +1,15 @@
 """The settings file: what it supplies, and what it must never break."""
 
 import json
+from pathlib import Path
+
+import pytest
 
 from ly.agent import AgentSession
 from ly.cli import Repl, build_parser
 from ly.compaction import CompactionConfig
 from ly.providers.backend import ModelBackend
+from ly.providers.errors import MissingCredentialsError, UnknownProviderError
 from ly.providers.provider import Provider
 from ly.session import SessionManager
 from ly.settings import Settings
@@ -23,18 +27,24 @@ def read(path) -> Settings:
 
 
 def test_a_missing_file_means_defaults(tmp_path):
-    assert read(tmp_path / "absent.json") == Settings()
+    settings = read(tmp_path / "absent.json")
+
+    # The default model names openai, so its endpoint comes along with it.
+    assert (settings.model, settings.base_url) == (
+        "openai/gpt-4.1",
+        "https://api.openai.com/v1",
+    )
 
 
 def test_a_malformed_file_does_not_stop_ly(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text("{not json", encoding="utf-8")
 
-    assert read(path) == Settings()
+    assert read(path) == read(tmp_path / "absent.json")
 
 
 def test_a_file_that_is_not_an_object_means_defaults(tmp_path):
-    assert read(write(tmp_path, ["model", "x"])) == Settings()
+    assert read(write(tmp_path, ["model", "x"])) == read(tmp_path / "absent.json")
 
 
 def test_known_keys_are_read(tmp_path):
@@ -80,20 +90,6 @@ def test_unknown_keys_and_bad_types_are_ignored_one_by_one(tmp_path):
     assert settings == Settings(model="kept")
 
 
-def test_the_file_supplies_argument_defaults():
-    settings = Settings(
-        model="from-file", base_url="https://file.test", api="responses"
-    )
-
-    args = build_parser(settings).parse_args([])
-
-    assert (args.model, args.base_url, args.api) == (
-        "from-file",
-        "https://file.test",
-        "responses",
-    )
-
-
 def test_environment_beats_the_file(tmp_path):
     path = write(tmp_path, {"model": "from-file", "api": "chat"})
 
@@ -137,6 +133,20 @@ def test_the_docker_image_comes_from_the_environment():
     assert Settings.load(env={"LY_DOCKER_IMAGE": "python:3.13"}).image == (
         "python:3.13"
     )
+
+
+def test_the_sessions_directory_is_resolved_here_and_the_mount_wins():
+    default = Settings.load(env={}).sessions_dir
+    preferred = Settings.load(env={"LY_SESSIONS_DIR": "/srv/sessions"}).sessions_dir
+    # Where the sandbox mounted the host's sessions is the truth: a stale
+    # preference must not describe a directory the container cannot see.
+    mounted = Settings.load(
+        env={"LY_SB_SESSIONS_DIR": "/sessions", "LY_SESSIONS_DIR": "/srv/x"}
+    ).sessions_dir
+
+    assert default == Path("~/.ly/sessions").expanduser()
+    assert preferred == Path("/srv/sessions")
+    assert mounted == Path("/sessions")
 
 
 def test_pass_reasoning_content_is_tri_state():
@@ -218,10 +228,181 @@ def test_the_repl_starts_with_the_file_toggles(tmp_path):
     session = AgentSession(
         backend=ModelBackend(Provider(model="m", base_url="u", api_key="k")),
         tools=[],
-        session_manager=SessionManager(in_memory=True),
+        session_manager=SessionManager(),
         system_prompt="system",
         cwd=str(tmp_path),
     )
     repl = Repl(session, settings=Settings(markdown=False, thinking=False))
 
     assert (repl.markdown, repl.show_thinking) == (False, False)
+
+
+# -- the model reference ------------------------------------------------------
+
+
+def absent(tmp_path) -> str:
+    """A path with no file at it, so only the environment is under test."""
+    return str(tmp_path / "absent.json")
+
+
+def test_a_model_without_a_provider_names_nowhere(tmp_path):
+    settings = Settings.load(absent(tmp_path), env={"LY_MODEL": "gpt-4.1"})
+
+    assert settings.provider is None
+    with pytest.raises(UnknownProviderError) as raised:
+        settings.make_provider()
+
+    # The message has to say what to type instead, since nothing else does.
+    assert "provider/model" in str(raised.value)
+    assert "deepseek/*" in str(raised.value)
+
+
+def test_the_provider_half_supplies_the_endpoint(tmp_path):
+    settings = Settings.load(
+        absent(tmp_path), env={"LY_MODEL": "deepseek/deepseek-chat"}
+    )
+
+    assert (settings.provider, settings.model_name, settings.base_url) == (
+        "deepseek",
+        "deepseek-chat",
+        "https://api.deepseek.com",
+    )
+
+
+def test_only_the_first_slash_separates(tmp_path):
+    """Providers that name models with a slash (`moonshotai/kimi`) keep them."""
+    settings = Settings.load(
+        absent(tmp_path), env={"LY_MODEL": "openai/moonshotai/kimi-k2"}
+    )
+
+    assert settings.model_name == "moonshotai/kimi-k2"
+    assert settings.base_url == "https://api.openai.com/v1"
+
+
+def test_explicit_values_beat_the_preset(tmp_path):
+    settings = Settings.load(
+        absent(tmp_path),
+        env={
+            "LY_MODEL": "deepseek/deepseek-reasoner",
+            "LY_BASE_URL": "https://proxy.test/v1",
+            "LY_API": "responses",
+            "LY_API_KEY": "sk-env",
+        },
+    )
+
+    assert (settings.model_name, settings.base_url, settings.api) == (
+        "deepseek-reasoner",
+        "https://proxy.test/v1",
+        "responses",
+    )
+
+
+def test_the_preset_supplies_its_own_key_variable(tmp_path):
+    settings = Settings.load(
+        absent(tmp_path), env={"LY_MODEL": "openai/gpt-4.1", "OPENAI_API_KEY": "sk-o"}
+    )
+
+    assert settings.api_key == "sk-o"
+    # Every preset's, because /model can switch provider inside the container.
+    assert settings.key_variables == ("DEEPSEEK_API_KEY", "OPENAI_API_KEY")
+
+
+def test_a_generic_key_wins_over_the_preset_variable(tmp_path):
+    settings = Settings.load(
+        absent(tmp_path),
+        env={
+            "LY_MODEL": "openai/gpt-4.1",
+            "LY_API_KEY": "sk-env",
+            "OPENAI_API_KEY": "sk-openai",
+        },
+    )
+
+    assert settings.api_key == "sk-env"
+
+
+def test_a_model_override_beats_the_environment(tmp_path):
+    """`--model` and `/model` hand the reference in, and its provider wins.
+
+    A pinned `LY_MODEL` used to survive a switch, which sent one provider's
+    model name to another provider's endpoint.
+    """
+    env = {
+        "LY_MODEL": "openai/gpt-4.1",
+        "OPENAI_API_KEY": "sk-o",
+        "DEEPSEEK_API_KEY": "sk-d",
+    }
+
+    settings = Settings.load(absent(tmp_path), env=env)
+    switched = Settings.load(absent(tmp_path), env=env, model="deepseek/deepseek-chat")
+
+    assert (settings.model_name, settings.api_key) == ("gpt-4.1", "sk-o")
+    assert (switched.model_name, switched.api_key) == ("deepseek-chat", "sk-d")
+
+
+def test_a_file_provider_can_be_named(tmp_path):
+    path = write(
+        tmp_path,
+        {
+            "model": "mygateway/house-model",
+            "providers": {
+                "mygateway": {
+                    "base_url": "https://gw.test/v1",
+                    "key_env": ["MYGW_API_KEY"],
+                }
+            },
+        },
+    )
+
+    settings = Settings.load(path, env={"MYGW_API_KEY": "sk-gw"})
+
+    assert (settings.base_url, settings.model_name, settings.api_key) == (
+        "https://gw.test/v1",
+        "house-model",
+        "sk-gw",
+    )
+
+
+def test_a_file_provider_can_point_a_built_in_at_a_proxy(tmp_path):
+    path = write(
+        tmp_path,
+        {"providers": {"openai": {"base_url": "https://proxy.test/v1"}}},
+    )
+
+    settings = Settings.load(path, env={"OPENAI_API_KEY": "sk-openai"})
+
+    assert settings.base_url == "https://proxy.test/v1"
+    # The key variable stays the built-in one, and the default model names it.
+    assert settings.api_key == "sk-openai"
+    assert settings.model == "openai/gpt-4.1"
+
+
+def test_a_provider_entry_without_a_base_url_is_ignored(tmp_path):
+    path = write(tmp_path, {"providers": {"broken": {"model": "m"}}})
+
+    assert set(Settings.load(path, env={}).presets) == {"openai", "deepseek"}
+
+
+def test_a_missing_key_names_the_variable_the_provider_reads(tmp_path):
+    """`/model deepseek/...` should say which key deepseek wants, not just
+    LY_API_KEY, which it would also accept."""
+    settings = Settings.load(
+        absent(tmp_path), env={"LY_MODEL": "deepseek/deepseek-chat"}
+    )
+
+    with pytest.raises(MissingCredentialsError) as raised:
+        settings.make_provider()
+
+    assert (
+        str(raised.value) == "Missing credentials. Set DEEPSEEK_API_KEY or LY_API_KEY."
+    )
+
+
+def test_make_provider_sends_the_half_after_the_slash(tmp_path):
+    settings = Settings.load(
+        absent(tmp_path),
+        env={"LY_MODEL": "deepseek/deepseek-chat", "DEEPSEEK_API_KEY": "k"},
+    )
+
+    provider = settings.make_provider()
+
+    assert (provider.api, provider.model) == ("chat", "deepseek-chat")

@@ -7,7 +7,6 @@ last pointer in the file matters, which keeps the format append-only.
 """
 
 import json
-import os
 import re
 import textwrap
 import uuid
@@ -15,15 +14,6 @@ from datetime import datetime
 from pathlib import Path
 
 from .messages import AgentMessage, deserialize_message, new_id, serialize_message
-
-# `LY_SB_SESSIONS_DIR` is where the sandbox mounted the host's sessions, so it
-# wins over the preference: the mount, not the setting, decides where the files
-# really are. Spelled out rather than imported, since `sandbox` imports this.
-SESSIONS_DIR = Path(
-    os.environ.get("LY_SB_SESSIONS_DIR")
-    or os.environ.get("LY_SESSIONS_DIR")
-    or Path.home() / ".ly" / "sessions"
-)
 
 # The sessions directory is shared with other tools (notably the full ly CLI),
 # which lay their sessions out as `<cwd-slug>-<hash>/<uuid4>.jsonl` alongside an
@@ -42,13 +32,15 @@ NO_PROMPT = "(no prompt)"
 class SessionManager:
     """One session: the entry tree in memory plus the JSONL file backing it.
 
-    `in_memory` drops the file side entirely (sub-agents, tests), so the tree
-    lives only in `self.entries`.
+    `directory` is where the files go. `None` drops the file side entirely, so
+    the tree lives only in `self.entries`; sub-agents and tests use that. The
+    path is always supplied by the caller — this module reads no environment
+    and holds no default, so where sessions live is one value, resolved once by
+    `Settings` and passed down.
     """
 
-    def __init__(self, directory: Path | None = None, *, in_memory: bool = False):
-        self.directory = directory if directory is not None else SESSIONS_DIR
-        self.in_memory = in_memory
+    def __init__(self, directory: Path | None = None):
+        self.directory = directory
         self.file: Path | None = None  # set by new_session/load, None until then
         self.entries: dict[str, dict] = {}  # id -> entry, all branches, not just active
         self.current_id: str | None = None  # active leaf; history walks its parents
@@ -62,7 +54,7 @@ class SessionManager:
         """
         self.entries = {}
         self.current_id = None
-        if self.in_memory:
+        if self.directory is None:
             return
         date = datetime.now().strftime("%Y-%m-%d")
         self.directory.joinpath(date).mkdir(parents=True, exist_ok=True)
@@ -110,10 +102,18 @@ class SessionManager:
         return branch
 
     @staticmethod
-    def list_sessions(directory: Path | None = None) -> list[Path]:
-        """Session files this module wrote, most recently modified first."""
-        directory = directory if directory is not None else SESSIONS_DIR
-        if not directory.is_dir():
+    def list_sessions(directory: Path | None) -> list[Path]:
+        """Session files this module wrote, most recently modified first.
+
+        Args:
+            directory: Where sessions are written. `None` is an in-memory
+                session, which has no files to list.
+
+        Returns:
+            Matching session files, newest first; empty when there is nothing
+            to list or the directory does not exist yet.
+        """
+        if directory is None or not directory.is_dir():
             return []
         sessions = [
             p
@@ -191,7 +191,9 @@ class SessionManager:
         }
         self.entries[entry_id] = entry
         self.current_id = entry_id
-        if not self.in_memory and self.file is not None:
+        # `file` is None for an in-memory session, and stays None until
+        # `new_session` picks one for a persisted one.
+        if self.file is not None:
             with open(self.file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
                 f.write(json.dumps({"current": entry_id}) + "\n")

@@ -288,7 +288,7 @@ def test_aborted_tool_stream_answers_every_call_before_next_prompt(tmp_path):
     session = AgentSession(
         backend=backend,
         tools=[tool],
-        session_manager=SessionManager(in_memory=True),
+        session_manager=SessionManager(),
         system_prompt="test system prompt",
         cwd=str(tmp_path),
     )
@@ -569,7 +569,7 @@ def test_subscriber_failure_is_not_retried(event_type, error_type):
     session = AgentSession(
         backend=backend,
         tools=[],
-        session_manager=SessionManager(in_memory=True),
+        session_manager=SessionManager(),
         system_prompt="test",
     )
 
@@ -591,7 +591,7 @@ def test_subscriber_failure_is_not_retried(event_type, error_type):
 def test_persistence_failure_is_not_retried(monkeypatch, error_type):
     message = AssistantMessage(content=[TextContent(text="done")], model="fake")
     backend = FakeBackend([message])
-    manager = SessionManager(in_memory=True)
+    manager = SessionManager()
     session = AgentSession(
         backend=backend,
         tools=[],
@@ -633,7 +633,7 @@ def test_unexpected_provider_failure_is_not_retried(during_stream):
     session = AgentSession(
         backend=backend,
         tools=[],
-        session_manager=SessionManager(in_memory=True),
+        session_manager=SessionManager(),
         system_prompt="test",
     )
     with pytest.raises(RuntimeError, match="provider bug"):
@@ -677,12 +677,12 @@ def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
                     },
                 }
 
-    provider = Provider(base_url="https://explicit.example/v1", api_key="test")
-    backend = make_backend(provider, api, FakeReader)
+    provider = Provider(base_url="https://explicit.example/v1", api_key="test", api=api)
+    backend = make_backend(provider, FakeReader)
     session = AgentSession(
         backend=backend,
         tools=[],
-        session_manager=SessionManager(in_memory=True),
+        session_manager=SessionManager(),
         system_prompt="test",
     )
 

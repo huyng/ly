@@ -16,6 +16,17 @@ def options(*argv: str):
     return build_parser(Settings.load()).parse_args(list(argv))
 
 
+@pytest.fixture(autouse=True)
+def _clean_model_environment(monkeypatch):
+    """No provider settings from the machine: only what a test sets applies.
+
+    The model names its provider now, so an exported `LY_MODEL` would decide
+    whether `main` reaches docker at all.
+    """
+    for name in ("LY_MODEL", "LY_BASE_URL", "LY_API", "LY_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _must_not_run(*_args) -> None:
     """Stand-in for exec_in_docker: reaching docker from --help is a bug."""
     raise AssertionError("this command line must not start a container")
@@ -24,7 +35,7 @@ def _must_not_run(*_args) -> None:
 def test_command_mounts_the_working_directory_and_forwards_argv(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
-    command = sandbox.docker_command(["-p", "hello"])
+    command = sandbox.docker_command(["-p", "hello"], sessions_dir=tmp_path)
 
     assert f"{Path.cwd()}:/workspace" in command
     assert command[-7:] == [
@@ -72,7 +83,7 @@ def test_the_image_defaults_to_the_environment_then_the_builtin(monkeypatch):
 def test_command_uses_the_image_it_is_given(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
-    command = sandbox.docker_command([], image="example/ly:1")
+    command = sandbox.docker_command([], sessions_dir=tmp_path, image="example/ly:1")
 
     assert command[-5] == "example/ly:1"
 
@@ -80,7 +91,7 @@ def test_command_uses_the_image_it_is_given(monkeypatch, tmp_path):
 def test_command_runs_as_the_host_user_with_a_writable_home(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
-    command = sandbox.docker_command([])
+    command = sandbox.docker_command([], sessions_dir=tmp_path)
 
     assert command[command.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
     assert f"--env=HOME={sandbox.CONTAINER_HOME}" in command
@@ -95,7 +106,7 @@ def test_podman_keeps_the_host_uid_instead_of_passing_one(monkeypatch, tmp_path)
     """Rootless podman maps container root to us; `--user` asks for a subuid."""
     monkeypatch.chdir(tmp_path)
 
-    command = sandbox.docker_command([], keep_id=True)
+    command = sandbox.docker_command([], sessions_dir=tmp_path, keep_id=True)
 
     assert "--userns=keep-id" in command
     assert "--user" not in command
@@ -134,7 +145,7 @@ def test_a_missing_docker_does_not_crash_the_probe(monkeypatch):
 def test_command_drops_capabilities_and_forbids_new_privileges(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
-    command = sandbox.docker_command([])
+    command = sandbox.docker_command([], sessions_dir=tmp_path)
 
     assert "--cap-drop=ALL" in command
     assert "--security-opt=no-new-privileges" in command
@@ -145,7 +156,7 @@ def test_command_trusts_the_workspace_for_git(monkeypatch, tmp_path):
     refuse the repo, and the trust must stay scoped to /workspace."""
     monkeypatch.chdir(tmp_path)
 
-    command = sandbox.docker_command([])
+    command = sandbox.docker_command([], sessions_dir=tmp_path)
 
     assert "--env=GIT_CONFIG_COUNT=1" in command
     assert "--env=GIT_CONFIG_KEY_0=safe.directory" in command
@@ -155,7 +166,7 @@ def test_command_trusts_the_workspace_for_git(monkeypatch, tmp_path):
 def test_command_runs_the_local_ly_and_keeps_its_sessions(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
-    command = sandbox.docker_command([])
+    command = sandbox.docker_command([], sessions_dir=tmp_path)
 
     assert f"{Path(sandbox.ly.__file__).parent}:/opt/ly/ly:ro" in command
     assert "--env=PYTHONPATH=/opt/ly" in command
@@ -171,7 +182,7 @@ def test_command_forwards_ly_and_terminal_variables_only(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME_UNRELATED", "nope")
     monkeypatch.setenv("TERM", "xterm-256color")
 
-    command = sandbox.docker_command([])
+    command = sandbox.docker_command([], sessions_dir=tmp_path)
 
     assert "--env=LY_MODEL=gpt-4.1" in command
     assert "--env=TERM=xterm-256color" in command
@@ -218,7 +229,7 @@ def test_the_host_directory_travels_into_the_container(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("LY_SB_HOST_DIR", raising=False)
 
-    command = sandbox.docker_command([])
+    command = sandbox.docker_command([], sessions_dir=tmp_path)
 
     assert f"--env=LY_SB_HOST_DIR={tmp_path}" in command
 
@@ -236,6 +247,25 @@ def test_the_host_dir_is_not_forwarded_twice(monkeypatch):
     monkeypatch.setenv("LY_SB_HOST_DIR", "/stale/path")
 
     assert "--env=LY_SB_HOST_DIR=/stale/path" not in sandbox.forwarded_env()
+
+
+def test_a_provider_key_travels_by_name(monkeypatch):
+    """A preset keeps its key under its own variable, and the container cannot
+    guess the name, so the caller passes it in."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek")
+    monkeypatch.delenv("LY_API_KEY", raising=False)
+
+    forwarded = sandbox.forwarded_env(("DEEPSEEK_API_KEY",))
+
+    assert "--env=DEEPSEEK_API_KEY=sk-deepseek" in forwarded
+
+
+def test_an_unset_provider_key_is_not_forwarded(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    assert not any(
+        "DEEPSEEK" in part for part in sandbox.forwarded_env(("DEEPSEEK_API_KEY",))
+    )
 
 
 def test_hand_off_is_the_default_but_can_be_turned_off(monkeypatch):
@@ -263,13 +293,16 @@ def test_help_and_version_never_start_a_container(monkeypatch, capsys):
 def test_a_real_run_hands_the_whole_command_line_to_docker(monkeypatch):
     handed_off: list[list[str]] = []
 
-    def record(argv: list[str], *, image: str) -> None:
+    def record(
+        argv: list[str], *, sessions_dir: Path, image: str, extra_env=()
+    ) -> None:
         handed_off.append([image, *argv])
         raise SystemExit(0)
 
     monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
     monkeypatch.delenv("LY_DOCKER", raising=False)
     monkeypatch.delenv("LY_DOCKER_IMAGE", raising=False)
+    monkeypatch.setenv("LY_API_KEY", "sk-test")
     monkeypatch.setattr(sandbox, "exec_in_docker", record)
 
     with pytest.raises(SystemExit):
@@ -281,13 +314,16 @@ def test_a_real_run_hands_the_whole_command_line_to_docker(monkeypatch):
 def test_the_sandbox_flag_reaches_docker(monkeypatch):
     handed_off: list[list[str]] = []
 
-    def record(argv: list[str], *, image: str) -> None:
+    def record(
+        argv: list[str], *, sessions_dir: Path, image: str, extra_env=()
+    ) -> None:
         handed_off.append([image, *argv])
         raise SystemExit(0)
 
     monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
     monkeypatch.delenv("LY_DOCKER", raising=False)
     monkeypatch.delenv("LY_DOCKER_IMAGE", raising=False)
+    monkeypatch.setenv("LY_API_KEY", "sk-test")
     monkeypatch.setattr(sandbox, "exec_in_docker", record)
 
     with pytest.raises(SystemExit):
@@ -304,7 +340,6 @@ def test_the_sandbox_flag_reaches_docker(monkeypatch):
 def test_a_sessions_directory_that_cannot_be_created_says_so(monkeypatch, tmp_path):
     """The user owns this path, so a refusal is the machine, not a fixable setup."""
     sessions = tmp_path / "sessions"
-    monkeypatch.setattr(sandbox, "SESSIONS_DIR", sessions)
     monkeypatch.setattr(sandbox.os, "execvp", _must_not_run)
 
     def refuse(*_args, **_kwargs):
@@ -313,7 +348,7 @@ def test_a_sessions_directory_that_cannot_be_created_says_so(monkeypatch, tmp_pa
     monkeypatch.setattr(sandbox.Path, "mkdir", refuse)
 
     with pytest.raises(SystemExit) as exited:
-        sandbox.exec_in_docker([])
+        sandbox.exec_in_docker([], sessions_dir=sessions)
 
     message = str(exited.value)
     assert str(sessions) in message
@@ -324,7 +359,6 @@ def test_a_sessions_directory_that_cannot_be_created_says_so(monkeypatch, tmp_pa
 
 def test_a_writable_sessions_directory_hands_off(monkeypatch, tmp_path):
     sessions = tmp_path / "sessions"
-    monkeypatch.setattr(sandbox, "SESSIONS_DIR", sessions)
     # Never probe the host's docker from a test: it may not exist, and the
     # answer must not change what this test asserts.
     monkeypatch.setattr(sandbox, "runtime_is_podman", lambda: False)
@@ -337,7 +371,7 @@ def test_a_writable_sessions_directory_hands_off(monkeypatch, tmp_path):
     monkeypatch.setattr(sandbox.os, "execvp", lambda name, command: record(command))
 
     with pytest.raises(SystemExit):
-        sandbox.exec_in_docker(["-p", "hello"])
+        sandbox.exec_in_docker(["-p", "hello"], sessions_dir=sessions)
 
     assert sessions.is_dir()  # created for the bind mount
     assert handed_off[0][0] == "docker"
@@ -345,7 +379,7 @@ def test_a_writable_sessions_directory_hands_off(monkeypatch, tmp_path):
 
 def test_the_hand_off_asks_podman_to_keep_the_host_uid(monkeypatch, tmp_path):
     """Regression: a fresh machine on rootless podman could not write /sessions."""
-    monkeypatch.setattr(sandbox, "SESSIONS_DIR", tmp_path / "sessions")
+    sessions = tmp_path / "sessions"
     monkeypatch.setattr(sandbox, "runtime_is_podman", lambda: True)
     handed_off: list[list[str]] = []
 
@@ -356,7 +390,52 @@ def test_the_hand_off_asks_podman_to_keep_the_host_uid(monkeypatch, tmp_path):
     monkeypatch.setattr(sandbox.os, "execvp", lambda name, command: record(command))
 
     with pytest.raises(SystemExit):
-        sandbox.exec_in_docker([])
+        sandbox.exec_in_docker([], sessions_dir=sessions)
 
     assert "--userns=keep-id" in handed_off[0]
     assert "--user" not in handed_off[0]
+
+
+# -- provider presets and the hand-off ----------------------------------------
+
+
+def clean_providers(monkeypatch, tmp_path) -> None:
+    """No settings file, and no `LY_*` sandbox setting from the machine."""
+    monkeypatch.setattr("ly.settings.DEFAULT_PATH", str(tmp_path / "absent.json"))
+    monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
+    monkeypatch.delenv("LY_DOCKER", raising=False)
+
+
+def test_every_presets_key_variable_is_carried(monkeypatch, tmp_path):
+    """`/model` switches provider inside the container, so a key the host did
+    not start with still has to be there when the switch happens."""
+    clean_providers(monkeypatch, tmp_path)
+    monkeypatch.setenv("LY_MODEL", "deepseek/deepseek-chat")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek")
+    handed_off: list[tuple[str, ...]] = []
+
+    def record(
+        argv: list[str], *, sessions_dir: Path, image: str, extra_env=()
+    ) -> None:
+        handed_off.append(extra_env)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(sandbox, "exec_in_docker", record)
+
+    with pytest.raises(SystemExit):
+        main(["-p", "hello"])
+
+    assert handed_off == [("DEEPSEEK_API_KEY", "OPENAI_API_KEY")]
+
+
+def test_a_model_without_a_provider_stops_before_docker(monkeypatch, tmp_path):
+    clean_providers(monkeypatch, tmp_path)
+    monkeypatch.setenv("LY_MODEL", "gpt-4.1")
+    monkeypatch.setenv("LY_API_KEY", "sk-test")
+    monkeypatch.setattr(sandbox, "exec_in_docker", _must_not_run)
+
+    with pytest.raises(SystemExit) as exited:
+        main(["-p", "hello"])
+
+    assert "provider/model" in str(exited.value)
+    assert "deepseek/*" in str(exited.value)  # the names it could have meant

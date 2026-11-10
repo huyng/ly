@@ -1,9 +1,9 @@
 """Where to talk to a model: the configuration one backend reads.
 
-`Provider` is a plain record — model, endpoint, credentials, timeout — with no
-behaviour. A backend holds the provider and reads these fields on every
-request, so `provider.model = ...` takes effect on the next one instead of
-being shadowed by a copy taken inside the backend.
+`Provider` is a plain record — model, endpoint, credentials, wire format,
+timeout — with no behaviour. A backend holds the provider and reads these
+fields on every request, so `provider.model = ...` takes effect on the next one
+instead of being shadowed by a copy taken inside the backend.
 """
 
 from .errors import MissingBaseURLError, MissingCredentialsError
@@ -20,6 +20,7 @@ class Provider:
         model: str = DEFAULT_MODEL,
         base_url: str = "",
         api_key: str = "",
+        api: str = "chat",
         pass_reasoning_content: bool | None = None,
     ):
         if not api_key:
@@ -37,5 +38,8 @@ class Provider:
 
         self.model = model
         self.base_url = base_url
+        # "chat" for `/chat/completions`, "responses" for `/responses`; the
+        # latter is the only route to tools on OpenAI's newest models.
+        self.api = (api or "chat").strip().lower()
         self.api_key = api_key
         self.pass_reasoning_content = pass_reasoning_content

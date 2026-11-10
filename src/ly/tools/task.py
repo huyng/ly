@@ -102,7 +102,7 @@ class SubAgentTool(Tool):
         sub = AgentSession(
             backend=self._parent.backend,
             tools=_explorer_tools(cwd),
-            session_manager=SessionManager(in_memory=True),
+            session_manager=SessionManager(),
             system_prompt=(
                 f"{SUBAGENT_SYSTEM_PROMPT}\nWorking directory: {os.path.abspath(cwd)}\n"
             ),

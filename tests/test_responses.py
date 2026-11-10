@@ -512,9 +512,10 @@ def test_make_backend_picks_the_backend(api, expected):
         model="m",
         base_url="https://explicit.example/v1",
         api_key="test-key",
+        api=api,
     )
 
-    backend = make_backend(provider, api)
+    backend = make_backend(provider)
 
     assert isinstance(backend, ResponsesBackend) is (expected == "responses")
 

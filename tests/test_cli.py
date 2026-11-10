@@ -1,6 +1,8 @@
 """Tests for the REPL's status line: it must show the size of the next request,
 not just the cumulative token totals."""
 
+import json
+
 import pytest
 
 from ly.agent import AgentSession
@@ -23,7 +25,7 @@ from ly.messages import (
     UserMessage,
 )
 from ly.providers import Provider
-from ly.providers.backend import ModelBackend
+from ly.providers.backend import ModelBackend, ResponsesBackend
 from ly.session import SessionManager
 from ly.theme import Theme
 
@@ -42,7 +44,7 @@ def make_repl(threshold_tokens: int = 100_000, enabled: bool = True) -> Repl:
     session = AgentSession(
         backend=ScriptedBackend(),
         tools=[],
-        session_manager=SessionManager(in_memory=True),
+        session_manager=SessionManager(),
         system_prompt="system",
         compaction=CompactionConfig(enabled=enabled, threshold_tokens=threshold_tokens),
     )
@@ -96,7 +98,6 @@ def test_config_says_when_no_api_key_is_set(capsys):
 
 def sessions_repl(monkeypatch, tmp_path, *prompts) -> Repl:
     """A REPL whose `/sessions` listing is exactly the files in `tmp_path`."""
-    monkeypatch.setattr("ly.session.SESSIONS_DIR", tmp_path)
     manager = SessionManager(directory=tmp_path)
     manager.new_session()
     for prompt in prompts:
@@ -282,51 +283,38 @@ def test_banner_stays_quiet_on_the_host(capsys, monkeypatch):
     assert "docker" not in capsys.readouterr().out
 
 
-def test_print_mode_says_it_is_in_docker_on_stderr(monkeypatch, capsys):
+def test_print_mode_says_it_is_in_docker_on_stderr(monkeypatch, capsys, tmp_path):
     from ly.cli import print_mode
 
     monkeypatch.setenv("LY_SB_IN_CONTAINER", "1")
     monkeypatch.setenv("LY_SB_IMAGE", "example/image:1")
 
-    def no_session(_args):
+    def no_session(_args, _provider, _sessions_dir):
         raise SystemExit(0)
 
     monkeypatch.setattr("ly.cli.make_session", no_session)
+    provider = Provider(model="m", base_url="u", api_key="k")
 
     with pytest.raises(SystemExit):
-        print_mode(build_parser().parse_args(["-p", "hi"]))
+        print_mode(build_parser().parse_args(["-p", "hi"]), provider, tmp_path)
 
     captured = capsys.readouterr()
     assert captured.err == "ly: docker example/image:1\n"
     assert captured.out == ""  # stdout stays clean for pipes
 
 
-def test_env_variables_become_argument_defaults(monkeypatch):
+def test_no_provider_option_is_a_flag(monkeypatch):
+    """They come from LY_* and the settings file, so host and container cannot
+    disagree about which endpoint they are talking to."""
     from ly.cli import build_parser
     from ly.settings import Settings
 
-    monkeypatch.setenv("LY_MODEL", "deepseek-flash")
-    monkeypatch.setenv("LY_BASE_URL", "https://api.deepseek.com")
-    monkeypatch.setenv("LY_API_KEY", "env-key")
-    monkeypatch.setenv("LY_API", "responses")
-
-    args = build_parser(Settings.load()).parse_args([])
-
-    assert args.model == "deepseek-flash"
-    assert args.base_url == "https://api.deepseek.com"
-    assert args.api_key == "env-key"
-    assert args.api == "responses"
-
-
-def test_no_provider_options_are_flags(monkeypatch):
-    from ly.cli import build_parser
-    from ly.settings import Settings
-
+    monkeypatch.setenv("LY_MODEL", "deepseek/deepseek-chat")
     monkeypatch.setenv("LY_API_KEY", "env-key")
 
-    assert build_parser(Settings.load()).parse_args([]).api_key == "env-key"
+    assert Settings.load().api_key == "env-key"
 
-    for flag in ("--model", "--base-url", "--api", "--api-key"):
+    for flag in ("--model", "--base-url", "--api", "--api-key", "--provider"):
         with pytest.raises(SystemExit):
             build_parser().parse_args([flag, "x"])
 
@@ -337,6 +325,7 @@ def test_a_sessions_directory_that_cannot_be_written_is_explained(monkeypatch):
     from ly.session import SessionManager
 
     monkeypatch.setenv("LY_SB_IN_CONTAINER", "1")
+    monkeypatch.delenv("LY_MODEL", raising=False)
     monkeypatch.setenv("LY_BASE_URL", "https://x/v1")
     monkeypatch.setenv("LY_API_KEY", "test")
 
@@ -353,3 +342,115 @@ def test_a_sessions_directory_that_cannot_be_written_is_explained(monkeypatch):
     assert "Permission denied" in message
     # Nothing is guessed about why: this path is ours to create.
     assert "chown" not in message
+
+
+# -- switching models and providers -------------------------------------------
+
+
+def provider_repl(monkeypatch, tmp_path) -> Repl:
+    """A REPL whose switches resolve from a clean environment, not this machine's."""
+    monkeypatch.setattr("ly.settings.DEFAULT_PATH", str(tmp_path / "absent.json"))
+    for name in ("LY_MODEL", "LY_BASE_URL", "LY_API", "LY_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek")
+    return make_repl()
+
+
+def test_the_model_command_shows_the_provider_with_the_model(
+    monkeypatch, capsys, tmp_path
+):
+    repl = provider_repl(monkeypatch, tmp_path)
+
+    repl._command("/model")
+
+    assert "openai/gpt-4.1" in capsys.readouterr().out
+
+
+def test_a_switch_changes_the_endpoint_model_and_key(monkeypatch, capsys, tmp_path):
+    repl = provider_repl(monkeypatch, tmp_path)
+
+    repl._command("/model deepseek/deepseek-chat")
+
+    provider = repl.session.backend.provider
+    assert provider.base_url == "https://api.deepseek.com"
+    assert provider.model == "deepseek-chat"
+    assert provider.api_key == "sk-deepseek"
+    assert repl.settings.provider == "deepseek"
+    assert "deepseek/deepseek-chat" in capsys.readouterr().out
+
+
+def test_a_model_without_a_provider_changes_nothing(monkeypatch, capsys, tmp_path):
+    repl = provider_repl(monkeypatch, tmp_path)
+    before = repl.session.backend
+
+    repl._command("/model deepseek-chat")
+
+    assert repl.session.backend is before
+    assert "provider/model" in capsys.readouterr().out
+
+
+def test_a_slash_inside_the_model_name_stays_there(monkeypatch, capsys, tmp_path):
+    repl = provider_repl(monkeypatch, tmp_path)
+
+    repl._command("/model openai/moonshotai/kimi-k2")
+
+    provider = repl.session.backend.provider
+    assert provider.model == "moonshotai/kimi-k2"
+    assert provider.base_url == "https://api.openai.com/v1"
+
+
+def test_a_switch_rebuilds_the_backend_for_the_new_wire_format(
+    monkeypatch, capsys, tmp_path
+):
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "gw": {"base_url": "https://gw.test/v1", "api": "responses"}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    repl = provider_repl(monkeypatch, tmp_path)
+    monkeypatch.setattr("ly.settings.DEFAULT_PATH", str(path))
+    monkeypatch.setenv("LY_API_KEY", "sk-gw")
+
+    repl._command("/model gw/house-model")
+
+    assert isinstance(repl.session.backend, ResponsesBackend)
+    assert repl.session.backend.provider.api == "responses"
+
+
+def test_a_provider_without_a_key_says_so(monkeypatch, capsys, tmp_path):
+    repl = provider_repl(monkeypatch, tmp_path)
+    monkeypatch.delenv("DEEPSEEK_API_KEY")
+    before = repl.settings
+
+    repl._command("/model deepseek/deepseek-chat")
+
+    # Named, so a key kept under the provider's own variable is not a dead end.
+    assert "Set DEEPSEEK_API_KEY or LY_API_KEY" in capsys.readouterr().out
+    assert repl.settings is before
+    assert repl.session.backend.provider.model == "fake-model"
+
+
+def test_there_is_no_provider_command(monkeypatch, capsys, tmp_path):
+    """One way to switch: the provider is part of the model, not a mode."""
+    repl = provider_repl(monkeypatch, tmp_path)
+
+    repl._command("/provider deepseek")
+
+    assert "unknown command" in capsys.readouterr().out
+
+
+def test_config_names_the_provider_in_effect(monkeypatch, capsys, tmp_path):
+    repl = provider_repl(monkeypatch, tmp_path)
+    repl._command("/model deepseek/deepseek-reasoner")
+
+    repl._command("/config")
+
+    out = capsys.readouterr().out
+    assert "provider" in out and "deepseek" in out

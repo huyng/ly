@@ -30,10 +30,31 @@ class MissingCredentialsError(ProviderError):
     Built at construction time, so the message must say how to supply a key.
     """
 
-    def __init__(self):
-        super().__init__("Missing credentials. Set LY_API_KEY.", retryable=False)
+    def __init__(self, variables: tuple[str, ...] = ()):
+        # The provider's own variable comes first, then the generic one, which
+        # wins when both are set. Naming both is the point: a key under only
+        # one of them is enough to start.
+        names = [*dict.fromkeys(variables), "LY_API_KEY"]
+        super().__init__(
+            f"Missing credentials. Set {' or '.join(names)}.", retryable=False
+        )
 
 
 class MissingBaseURLError(ProviderError):
     def __init__(self):
         super().__init__("Missing Base URL for api. Set LY_BASE_URL", retryable=False)
+
+
+class UnknownProviderError(ProviderError):
+    """The model reference names no provider ly knows.
+
+    Raised where a model is resolved, so the message must say what to write
+    instead. A model with no provider in front of it lands here too.
+    """
+
+    def __init__(self, model: str, known: str):
+        super().__init__(
+            f"Model {model!r} names no known provider. "
+            f"Write provider/model, such as one of: {known}",
+            retryable=False,
+        )

@@ -149,7 +149,7 @@ def test_legacy_assistant_metadata_loads(tmp_path, provider, api):
 
 
 def test_active_branch_preserves_timestamps(monkeypatch):
-    manager = SessionManager(in_memory=True)
+    manager = SessionManager()
     message = UserMessage("hello")
     message.timestamp = 123
     manager.append(message)

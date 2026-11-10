@@ -13,7 +13,6 @@ from pathlib import Path
 
 import ly
 
-from .session import SESSIONS_DIR
 from .settings import DEFAULT_PATH
 
 DEFAULT_IMAGE = "python:3.12"
@@ -59,16 +58,23 @@ def host_dir() -> str | None:
     return os.environ.get(SANDBOX_PREFIX + "HOST_DIR")
 
 
-def forwarded_env() -> list[str]:
+def forwarded_env(extra: tuple[str, ...] = ()) -> list[str]:
     """Build `--env` flags for the host settings the container-side ly reads.
 
     Every `LY_*` variable is a setting and travels, except the `LY_SB_*` ones,
     which describe a container and are set for it rather than inherited, and the
     host-only switches in `NOT_FORWARDED`, which chose what to start.
 
+    Args:
+        extra: Names to forward besides `LY_*`, whether or not they are set.
+            A provider keeps its key under its own variable (see
+            `settings.Settings.key_variables`), which the container cannot
+            guess; unset names are skipped so nothing empty arrives.
+
     Returns:
         `--env=NAME=value` arguments for the `LY_*` variables the host set,
-        plus the terminal variables that decide colour and readline behaviour.
+        the named extras, and the terminal variables that decide colour and
+        readline behaviour.
     """
     names = [
         name
@@ -80,6 +86,7 @@ def forwarded_env() -> list[str]:
     names += [
         name for name in ("TERM", "NO_COLOR", "FORCE_COLOR") if name in os.environ
     ]
+    names += [name for name in extra if name in os.environ]
     return [f"--env={name}={os.environ[name]}" for name in names]
 
 
@@ -101,17 +108,27 @@ def runtime_is_podman() -> bool:
 
 
 def docker_command(
-    argv: list[str], *, image: str = DEFAULT_IMAGE, keep_id: bool = False
+    argv: list[str],
+    *,
+    sessions_dir: Path,
+    image: str = DEFAULT_IMAGE,
+    keep_id: bool = False,
+    extra_env: tuple[str, ...] = (),
 ) -> list[str]:
     """Build the `docker run` command that re-runs ly inside a container.
 
     Args:
         argv: The host command line, forwarded verbatim after the image name.
+        sessions_dir: The host directory to bind-mount as the container's
+            session store. Passed in rather than read here, so the CLI's one
+            resolved value is the only answer to where sessions live.
         image: The image to start. Callers take it from the `--sandbox` flag
             or `LY_DOCKER_IMAGE`, so this function never reads the environment.
         keep_id: Map the container process to this uid instead of passing an
             explicit `--user`. Needed for podman, whose user namespace maps
             container root to the host user and everything else to a subuid.
+        extra_env: Non-`LY_*` variables the container-side ly needs, such as the
+            selected provider's key variable.
 
     Returns:
         A ready-to-exec argv list starting with `docker`.
@@ -145,7 +162,7 @@ def docker_command(
     # Sessions sit outside the project so /resume still finds them next run.
     command += [
         "-v",
-        f"{SESSIONS_DIR}:/sessions",
+        f"{sessions_dir}:/sessions",
         f"--env={SANDBOX_PREFIX}SESSIONS_DIR=/sessions",
     ]
     # Personal instructions, or the system prompt quietly loses them. They
@@ -161,7 +178,7 @@ def docker_command(
     # Run the ly that is on the host, not a copy baked into an image.
     package = Path(ly.__file__).parent
     command += ["-v", f"{package}:/opt/ly/ly:ro", "--env=PYTHONPATH=/opt/ly"]
-    command += forwarded_env()
+    command += forwarded_env(extra_env)
     # The container sees /workspace; only this tells the banner which host
     # directory that is, and the banner is how the mount is made visible.
     command += [f"--env={SANDBOX_PREFIX}HOST_DIR={Path.cwd()}"]
@@ -175,24 +192,39 @@ def docker_command(
     return command + list(argv)
 
 
-def exec_in_docker(argv: list[str], *, image: str = DEFAULT_IMAGE) -> None:
+def exec_in_docker(
+    argv: list[str],
+    *,
+    sessions_dir: Path,
+    image: str = DEFAULT_IMAGE,
+    extra_env: tuple[str, ...] = (),
+) -> None:
     """Replace this process with `docker run` running ly in the container.
 
     Args:
         argv: The host command line, forwarded verbatim.
+        sessions_dir: The host directory holding sessions; created if missing
+            and bind-mounted into the container.
         image: The image to start, already resolved by the CLI.
+        extra_env: Non-`LY_*` variables to forward; see `forwarded_env`.
 
     Raises:
         SystemExit: docker is not installed, or the session directory cannot
             be created.
     """
     try:
-        Path(SESSIONS_DIR).mkdir(parents=True, exist_ok=True)
+        sessions_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         # Nothing here diagnoses why: this directory is ours to create, so a
         # refusal means the filesystem or $HOME is in a state we cannot guess.
-        raise SystemExit(f"ly: cannot create {SESSIONS_DIR}: {exc}") from exc
-    command = docker_command(argv, image=image, keep_id=runtime_is_podman())
+        raise SystemExit(f"ly: cannot create {sessions_dir}: {exc}") from exc
+    command = docker_command(
+        argv,
+        sessions_dir=sessions_dir,
+        image=image,
+        keep_id=runtime_is_podman(),
+        extra_env=extra_env,
+    )
     try:
         os.execvp(command[0], command)
     except FileNotFoundError:

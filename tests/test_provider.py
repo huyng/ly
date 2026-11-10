@@ -576,6 +576,12 @@ def test_missing_credentials_raise_at_construction(base_url):
     assert str(exc.value) == "Missing credentials. Set LY_API_KEY."
 
 
+def test_missing_credentials_can_name_the_providers_own_variable():
+    error = MissingCredentialsError(("DEEPSEEK_API_KEY",))
+
+    assert "DEEPSEEK_API_KEY or LY_API_KEY" in str(error)
+
+
 def test_abort_mid_stream_closes_reader_and_reports_aborted():
     import threading
 

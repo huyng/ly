@@ -17,6 +17,7 @@ import textwrap
 import time
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from uuid import uuid4
 
 from . import __version__, sandbox
@@ -39,7 +40,11 @@ from .events import (
 )
 from .prompts import build_system_prompt, context_files
 from .providers import Provider, make_backend
-from .providers.errors import MissingCredentialsError
+from .providers.errors import (
+    MissingBaseURLError,
+    MissingCredentialsError,
+    UnknownProviderError,
+)
 from .render import (
     GutterWriter,
     MarkdownRenderer,
@@ -47,7 +52,7 @@ from .render import (
     render_tool_result,
     summarize_tool_call,
 )
-from .session import SESSIONS_DIR, SYNOPSIS_CHARS, SessionManager
+from .session import SYNOPSIS_CHARS, SessionManager
 from .settings import Settings
 from .spinner import Spinner
 from .theme import BAND, DIM, RESET, SHADE, Theme, get_theme, terminal_width
@@ -55,7 +60,7 @@ from .tools import default_tools
 
 HELP = """\
 /help              Show this help
-/model [name]      Show or switch the model
+/model [ref]       Show the model, or switch to `provider/model`
 /tools             List active tools
 /system            Show the current system prompt
 /config            Show the settings in effect
@@ -84,23 +89,20 @@ def use_container(args: argparse.Namespace) -> bool:
     return not (sandbox.in_container() or args.nosandbox)
 
 
-def make_session(args: argparse.Namespace) -> AgentSession:
-    provider = Provider(
-        model=args.model,
-        base_url=args.base_url,
-        api_key=args.api_key,
-        pass_reasoning_content=args.pass_reasoning_content,
-    )
-    manager = SessionManager()
+def make_session(
+    args: argparse.Namespace, provider: Provider, sessions_dir: Path
+) -> AgentSession:
+    """Build the session this run uses, in the directory `main` resolved."""
+    manager = SessionManager(sessions_dir)
     if args.resume:
-        sessions = SessionManager.list_sessions()
+        sessions = SessionManager.list_sessions(sessions_dir)
         if not sessions:
             sys.exit("No sessions found.")
         manager.load(sessions[args.resume - 1])
     else:
         manager.new_session()
     return AgentSession(
-        backend=make_backend(provider, args.api),
+        backend=make_backend(provider),
         tools=default_tools(cwd=os.getcwd()),
         session_manager=manager,
         system_prompt=build_system_prompt(os.getcwd()),
@@ -120,9 +122,9 @@ class Repl:
         self.theme = theme if theme is not None else get_theme()
         self.width = terminal_width()
         preferences = settings or Settings()
+        self.settings = preferences
         self.markdown = preferences.markdown
         self.show_thinking = preferences.thinking
-        self.api = preferences.api or "chat"
         self.commands = discover(self.session.cwd)
         self._pastes: dict[str, str] = {}
 
@@ -315,7 +317,7 @@ class Repl:
         theme = self.theme
         print(
             f"{theme.bold('ly')} {theme.dim('v' + __version__)} {theme.dim('·')} "
-            f"{theme.model(self.session.backend.provider.model)}"
+            f"{theme.model(self.settings.model)}"
         )
         print(theme.dim(f"  • session {self.session.session_manager.file}"))
         if sandbox.in_container():
@@ -505,12 +507,41 @@ class Repl:
 
     # -- slash commands -------------------------------------------------------------
 
+    def _switch_model(self, text: str) -> None:
+        """Switch to a `provider/model` reference, replacing the backend.
+
+        The transcript is untouched: only the endpoint, key, wire format and
+        model change, and the next request picks them up.
+
+        Args:
+            text: A model reference; the provider half names a preset and must
+                be there, since nothing says where a bare model goes.
+        """
+        # Resolved again rather than patched: the new provider brings its own
+        # endpoint, wire format and key variable, and `Settings` is where those
+        # are read. An unknown provider raises inside `make_provider`.
+        fresh = Settings.load(model=text)
+        try:
+            provider = fresh.make_provider()
+        except (
+            MissingCredentialsError,
+            MissingBaseURLError,
+            UnknownProviderError,
+        ) as exc:
+            print(self.theme.error(str(exc)))
+            return
+        # The wire format is baked into the backend class, so the backend is
+        # replaced. The reader carries over, so a test's stand-in survives.
+        self.session.backend = make_backend(provider, self.session.backend.reader)
+        self.settings = fresh
+
     def _print_config(self) -> None:
         """Print the settings in effect, reading live values where they can change.
 
-        The model and the two toggles can be switched mid-session, so they come
-        from the session and this object rather than from the `Settings` that
-        started the run. The API key is reported as set or unset, never printed.
+        The provider, model and the two toggles can be switched mid-session, so
+        they come from the session and this object rather than from the
+        `Settings` that started the run. The API key is reported as set or
+        unset, never printed.
         """
         provider = self.session.backend.provider
         compaction = self.session.compaction
@@ -519,9 +550,10 @@ class Repl:
         else:
             trigger = "off"
         rows = [
+            ("provider", self.settings.provider or "custom"),
             ("model", provider.model),
             ("base_url", provider.base_url or "unset"),
-            ("api", self.api),
+            ("api", provider.api),
             ("api key", "set (redacted)" if provider.api_key else "none set"),
             ("pass reasoning", _reasoning_mode(provider.pass_reasoning_content)),
             ("markdown", "on" if self.markdown else "off"),
@@ -552,10 +584,8 @@ class Repl:
                 print(f"  {label}{theme.dim(': ' + custom.description)}")
         elif command == "/model":
             if arg:
-                self.session.set_model(arg)
-            print(
-                f"{theme.dim('model:')} {theme.model(self.session.backend.provider.model)}"
-            )
+                self._switch_model(arg)
+            print(f"{theme.dim('model:')} {theme.model(self.settings.model)}")
         elif command == "/tools":
             for tool in self.session.tools.values():
                 first = tool.description.split(". ")[0]
@@ -577,7 +607,8 @@ class Repl:
             print(theme.dim(f"new session: {self.session.session_manager.file}"))
         elif command == "/sessions":
             width = terminal_width()
-            for i, path in enumerate(SessionManager.list_sessions(), 1):
+            directory = self.session.session_manager.directory
+            for i, path in enumerate(SessionManager.list_sessions(directory), 1):
                 marker = "→" if path == self.session.session_manager.file else " "
                 stamp = datetime.fromtimestamp(path.stat().st_mtime)
                 when = stamp.strftime("%Y-%m-%d %H:%M")
@@ -595,7 +626,8 @@ class Repl:
             if not arg.isdigit():
                 print("usage: /resume <n>")
                 return False
-            sessions = SessionManager.list_sessions()
+            manager_directory = self.session.session_manager.directory
+            sessions = SessionManager.list_sessions(manager_directory)
             index = int(arg) - 1
             if not 0 <= index < len(sessions):
                 print(theme.error("no such session"))
@@ -614,7 +646,9 @@ class Repl:
         return False
 
 
-def print_mode(args: argparse.Namespace) -> None:
+def print_mode(
+    args: argparse.Namespace, provider: Provider, sessions_dir: Path
+) -> None:
     """Run one prompt, write the final response to stdout.
 
     Deliberately plain: no styling, no tool chatter, no spinners. Failures go
@@ -624,7 +658,7 @@ def print_mode(args: argparse.Namespace) -> None:
     # silent, so say which one ran. stderr keeps stdout pipeable.
     if sandbox.in_container():
         print(f"ly: docker {sandbox.image_name()}", file=sys.stderr, flush=True)
-    session = make_session(args)
+    session = make_session(args, provider, sessions_dir)
     failures: list[str] = []
 
     def on_event(event) -> None:
@@ -647,26 +681,21 @@ def print_mode(args: argparse.Namespace) -> None:
 def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
     """The command line.
 
-    Every provider option is a default rather than a flag, filled in by
-    `Settings`, which reads the environment and the settings file and lets the
-    environment win. That is also what the sandbox container sees, so the host
-    and the container cannot disagree.
+    Provider options are defaults rather than flags, filled in by `Settings`,
+    which reads the environment and the settings file and lets the environment
+    win. That is also what the sandbox container sees, so the host and the
+    container cannot disagree about which endpoint they are talking to.
 
     Args:
         settings: Preferences from the settings file and the environment,
-            supplying the defaults for the provider options, the sandbox mode
-            and the image to start.
+            supplying the defaults for the sandbox mode and the image to
+            start.
     """
     settings = settings or Settings()
     parser = argparse.ArgumentParser(
         prog="ly", description="A minimal coding agent, modeled after pi"
     )
     parser.set_defaults(
-        model=settings.model or "gpt-4.1",
-        base_url=settings.base_url or "",
-        api=settings.api or "chat",
-        api_key=settings.api_key,
-        pass_reasoning_content=settings.pass_reasoning_content,
         image=settings.image or sandbox.DEFAULT_IMAGE,
         compaction=settings.compaction,
     )
@@ -706,23 +735,34 @@ def main(argv: list[str] | None = None) -> None:
     # Parse here rather than in the container: `--help`, `--version` and a bad
     # argument all exit during parsing, so none of them starts a container.
     args = build_parser(settings).parse_args(argv)
+    try:
+        # Before the container: a stale or misspelled model should fail once,
+        # where it was set, rather than inside a container that then exits.
+        provider = settings.make_provider()
+    except (MissingCredentialsError, MissingBaseURLError, UnknownProviderError) as exc:
+        sys.exit(str(exc))
     if use_container(args):
-        sandbox.exec_in_docker(argv, image=args.image)
+        # The container rebuilds its settings from what it inherits, so a key
+        # kept under the provider's own name has to travel with it.
+        sandbox.exec_in_docker(
+            argv,
+            sessions_dir=settings.sessions_dir,
+            image=args.image,
+            extra_env=settings.key_variables,
+        )
 
     try:
         if args.print:
             if not args.prompt:
                 sys.exit("-p requires a prompt")
-            print_mode(args)
+            print_mode(args, provider, settings.sessions_dir)
             return
 
-        session = make_session(args)
-    except MissingCredentialsError as exc:
-        sys.exit(str(exc))
+        session = make_session(args, provider, settings.sessions_dir)
     except OSError as exc:
         # The sessions directory is the only thing startup writes. Nothing here
         # says why it failed: a refusal is the machine's state, not ly's.
-        sys.exit(f"ly: cannot save sessions in {SESSIONS_DIR}: {exc}")
+        sys.exit(f"ly: cannot save sessions in {settings.sessions_dir}: {exc}")
 
     repl = Repl(session, settings=settings)
     if args.prompt:

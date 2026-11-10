@@ -151,9 +151,45 @@ def test_bash_call_prints_the_whole_script():
     out = summarize_tool_call(Theme(False), "bash", {"command": script}, 40)
 
     assert out.splitlines() == ["│ for f in *; do", '│   echo "$f"', "│ done"]
-    # A long one-liner is a script too: no ellipsis, no width cut.
+
+
+def test_a_long_one_line_bash_command_wraps_under_the_gutter():
+    """Regression: the whole command was returned as one line, so the terminal
+    wrapped it wherever it liked, mid-command and at column zero."""
     long = "echo " + "x" * 200
-    assert summarize_tool_call(Theme(False), "bash", {"command": long}, 40) == long
+    out = summarize_tool_call(Theme(False), "bash", {"command": long}, 40)
+    lines = out.splitlines()
+
+    assert all(len(line) <= 39 for line in lines)  # one column kept free
+    assert all(line.startswith("│ ") for line in lines)
+    # Still whole: wrapped, not cut. No ellipsis, and nothing dropped but the
+    # spaces the breaks landed on.
+    assert "…" not in out
+    assert "".join(line[2:] for line in lines) == long.replace(" ", "")
+
+
+def test_a_one_line_bash_command_that_fits_rides_on_the_header():
+    out = summarize_tool_call(Theme(False), "bash", {"command": "echo hi"}, 40)
+
+    assert out == "echo hi"
+
+
+def test_a_bash_command_is_wrapped_at_a_space_when_it_can_be():
+    command = "alpha beta gamma delta epsilon zeta eta theta iota kappa"
+    out = summarize_tool_call(Theme(False), "bash", {"command": command}, 20)
+    lines = out.splitlines()
+
+    assert all(len(line) <= 19 for line in lines)
+    # Breaks land between words, so every chunk is whole words, in order.
+    assert " ".join(line[2:] for line in lines) == command
+
+
+def test_result_preview_keeps_a_column_free():
+    """Regression: `width - 2` filled the last column, so the terminal wrapped
+    the line itself and the frame gained a blank line."""
+    for name, is_error in (("bash", False), ("read", True), ("grep", False)):
+        out = render_tool_result(Theme(False), name, "y" * 300, is_error, 1.0, 40)
+        assert all(len(line) <= 39 for line in out.splitlines()), name
 
 
 def test_bash_result_shows_preview_and_exit_code():

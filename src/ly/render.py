@@ -260,12 +260,17 @@ def summarize_tool_call(
 
     if name == "bash":
         # The script is what the user is deciding to trust, so it is shown
-        # whole. One-liners ride on the header line; scripts move below it so
-        # every line shares one gutter (the header adds the newline).
+        # whole. A one-liner short enough to sit beside the tool name rides on
+        # the header line; anything longer moves below it, where every line
+        # shares one gutter and is wrapped, so the terminal never wraps it on
+        # its own and leaves a stray fragment at column zero.
         lines = arg("command").splitlines()
-        if len(lines) == 1:
+        beside = max(width - 10, 1)  # what `╭─ bash ` leaves on the header
+        if len(lines) == 1 and len(lines[0]) <= beside:
             return theme.dim(lines[0])
-        return "\n".join(theme.dim("│ " + line) for line in lines)
+        room = max(width - 3, 1)  # `│ ` plus one column kept free
+        wrapped = [piece for line in lines for piece in _wrap(line, room)]
+        return "\n".join(theme.dim("│ " + line) for line in wrapped)
 
     if name == "grep":
         pattern = short(arg("pattern", "?"), max(width - 34, 12))
@@ -323,11 +328,13 @@ def render_tool_result(
     head = theme.dim("├─ ") + status
     foot = "\n" + theme.dim("╰─")
     lines = output.strip().splitlines()
+    # `│ ` plus one column kept free, the same rule `GutterWriter` follows:
+    # filling the last column makes the terminal wrap the line itself, and the
+    # newline this module prints would then move down a second time.
+    room = max(width - 3, 1)
 
     if is_error:
-        body = "\n".join(
-            theme.dim("│ " + _shorten(line, width - 2)) for line in lines[:6]
-        )
+        body = "\n".join(theme.dim("│ " + _shorten(line, room)) for line in lines[:6])
         if len(lines) > 6:
             body += "\n" + theme.dim(f"│ … {len(lines) - 6} more lines")
         return head + (("\n" + body) if body else "") + foot
@@ -371,9 +378,7 @@ def render_tool_result(
         if lines and lines[-1].startswith("[exit code:"):
             exit_note = lines.pop()
         preview = lines[:MAX_PREVIEW_LINES]
-        body = "\n".join(
-            theme.dim("│ " + _shorten(line, width - 2)) for line in preview
-        )
+        body = "\n".join(theme.dim("│ " + _shorten(line, room)) for line in preview)
         if len(lines) > MAX_PREVIEW_LINES:
             body += "\n" + theme.dim(f"│ … {len(lines) - MAX_PREVIEW_LINES} more lines")
         if exit_note:
@@ -381,10 +386,10 @@ def render_tool_result(
         return head + (("\n" + body) if body else "") + foot
 
     if name == "write":
-        return head + "\n" + theme.dim("│ " + _shorten(summary, width - 2)) + foot
+        return head + "\n" + theme.dim("│ " + _shorten(summary, room)) + foot
 
     preview = lines[:6]
-    body = "\n".join(theme.dim("│ " + _shorten(line, width - 2)) for line in preview)
+    body = "\n".join(theme.dim("│ " + _shorten(line, room)) for line in preview)
     if len(lines) > 6:
         body += "\n" + theme.dim(f"│ … {len(lines) - 6} more lines")
     return head + (("\n" + body) if body else "") + foot
@@ -409,6 +414,32 @@ def _as_int(value: object) -> int | None:
         return int(value)
     except ValueError:
         return None
+
+
+def _wrap(text: str, limit: int) -> list[str]:
+    """Split one line into chunks of at most `limit` columns.
+
+    Breaks on spaces where it can and mid-word only when a single word is wider
+    than the limit. A space the break lands on is dropped, as `GutterWriter`
+    does: it would otherwise end up trailing a line.
+
+    Args:
+        text: The line to break.
+        limit: Widest chunk to return, in columns; at least one.
+
+    Returns:
+        The chunks in order, the last one possibly empty.
+    """
+    chunks: list[str] = []
+    rest = text
+    while len(rest) > limit:
+        cut = rest.rfind(" ", 0, limit + 1)
+        if cut <= 0:  # a single word wider than the margin
+            cut = limit
+        chunks.append(rest[:cut])
+        rest = rest[cut:].lstrip(" ")
+    chunks.append(rest)
+    return chunks
 
 
 def _shorten(text: str, limit: int) -> str:

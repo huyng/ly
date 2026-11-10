@@ -82,9 +82,14 @@ def collect(backend, messages):
 def make_backend(
     chunks, model="deepseek-flash", base_url="https://api.deepseek.com", **config
 ) -> tuple[ChatCompletionsBackend, type[FakeReader]]:
-    """A chat backend whose reader replays `chunks` as the whole response."""
+    """A chat backend whose reader replays `chunks` as the whole response.
+
+    The default endpoint is DeepSeek, so it gets DeepSeek's reasoning
+    passthrough; a test naming another endpoint opts out of it by default.
+    """
     FakeReader.chunks = chunks
     FakeReader.built.clear()
+    config.setdefault("pass_reasoning_content", "deepseek" in base_url)
     provider = Provider(model=model, base_url=base_url, api_key="test-key", **config)
     return ChatCompletionsBackend(provider, FakeReader), FakeReader
 
@@ -562,7 +567,7 @@ def test_stream_that_yields_no_text_has_no_empty_text_block():
 
 def test_missing_base_url_raises_at_construction():
     with pytest.raises(MissingBaseURLError) as exc:
-        Provider(api_key="test-key")
+        Provider(model="m", api_key="test-key")
     assert "LY_BASE_URL" in str(exc.value)
     assert exc.value.retryable is False
 
@@ -572,7 +577,7 @@ def test_missing_base_url_raises_at_construction():
 )
 def test_missing_credentials_raise_at_construction(base_url):
     with pytest.raises(MissingCredentialsError) as exc:
-        Provider(base_url=base_url)
+        Provider(model="m", base_url=base_url)
     assert str(exc.value) == "Missing credentials. Set LY_API_KEY."
 
 

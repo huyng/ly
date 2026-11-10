@@ -12,6 +12,7 @@ import argparse
 import os
 import re
 import readline
+import select
 import sys
 import textwrap
 import time
@@ -127,6 +128,10 @@ class Repl:
         self.show_thinking = preferences.thinking
         self.commands = discover(self.session.cwd)
         self._pastes: dict[str, str] = {}
+        # Model names cannot be listed: no provider publishes them, and the
+        # preset table deliberately holds none. Tab therefore offers the
+        # providers it knows and the references this session has used.
+        self._models = [preferences.model]
 
         self.session.subscribe(self._on_event)
         self._text_started = False
@@ -394,6 +399,55 @@ class Repl:
         print(row(" "))  # and one below
         print()  # an unpainted line closes the band
 
+    def _completions(self, line: str) -> list[str]:
+        """Candidates for the model reference in a `/model` line.
+
+        Only the first word after the command is a reference, so a line that
+        already has two completes nothing rather than inserting a second one.
+
+        Args:
+            line: The text typed so far, as readline reports it.
+
+        Returns:
+            Matching references, provider prefixes first, or an empty list
+            when the cursor is not on a `/model` argument.
+        """
+        argument = line.removeprefix("/model ")
+        if argument == line or len(argument.split()) > 1:
+            return []
+        name, slash, _ = argument.partition("/")
+        if not slash:
+            # Before the slash, every provider is a candidate.
+            options = [f"{name}/" for name in sorted(self.settings.presets)]
+        else:
+            # After it, the provider's own models, then anything else this
+            # session has used, since the preset list is only a guide.
+            preset = self.settings.presets.get(name)
+            options = [f"{name}/{model}" for model in preset.models] if preset else []
+        options += [model for model in self._models if model not in options]
+        return [option for option in options if option.startswith(argument)]
+
+    def _complete(self, text: str, state: int) -> str | None:
+        """Readline's completion protocol: one candidate per call.
+
+        A candidate replaces only the word being completed, and the two
+        readlines disagree about where a word starts: GNU readline treats
+        `deepseek/deepseek-r` as one word, libedit breaks on the slash and
+        completes just `deepseek-r`. The typed part before that word is kept
+        and only the rest is offered, so the reference is not doubled.
+        """
+        line = readline.get_line_buffer()
+        start = len(line) - len(text) if line.endswith(text) else len(line)
+        typed = line[len("/model ") : start]
+        if not line.startswith("/model "):
+            typed = ""
+        options = [
+            option[len(typed) :]
+            for option in self._completions(line)
+            if option.startswith(typed)
+        ]
+        return options[state] if state < len(options) else None
+
     def _read(self, prompt: str) -> str | None:
         """Read a prompt, keeping bracketed pastes together until Enter."""
         try:
@@ -410,9 +464,28 @@ class Repl:
                 # GNU Readline must not count color sequences as visible columns.
                 prompt = re.sub(r"\x1b\[[0-9;]*m", "\001\\g<0>\002", prompt)
                 readline.parse_and_bind("set enable-bracketed-paste on")
-                return input(prompt)
+                # Enabling bracketed paste leaves Tab inserting a literal tab
+                # on this readline, so completion needs the binding back.
+                readline.parse_and_bind("tab: complete")
+                # Set for the read only, so importing ly never takes Tab away
+                # from whatever line editor the embedding program installed.
+                previous = readline.get_completer()
+                readline.set_completer(self._complete)
+                try:
+                    return input(prompt)
+                finally:
+                    readline.set_completer(previous)
         except EOFError:
             return None
+
+    def _paste_pending(self) -> bool:
+        """Whether a paste, rather than a key press, reached the hook.
+
+        Used on libedit, where Tab and the bracketed-paste sequence share one
+        completion entry point: the paste arrives with its introducer still
+        buffered, and a key press arrives with nothing waiting.
+        """
+        return bool(select.select([sys.stdin], [], [], 0)[0])
 
     def _read_libedit(self, prompt: str) -> str:
         """Capture literal pastes through libedit's completion hook.
@@ -427,8 +500,7 @@ class Repl:
         failures: list[BaseException] = []
 
         def paste(text: str, state: int) -> str | None:
-            if state:
-                return None
+            """Capture the bytes after the introducer and return a placeholder."""
             try:
                 data = bytearray()
                 while not data.endswith(b"\x1b[201~"):
@@ -441,17 +513,42 @@ class Repl:
                 marker = f"[paste {uuid4().hex[:8]}: {len(content)} chars]"
                 pastes[marker] = content
                 # Let completion insert and paint the placeholder immediately.
-                return text + marker
+                return marker
             except BaseException as exc:
                 # Readline swallows callback exceptions; propagate after input.
                 failures.append(exc)
             return None
 
+        inserted = False
+
+        def hook(text: str, state: int) -> str | None:
+            """Send Tab to completion and a paste to the placeholder hook.
+
+            Libedit has one entry point for both, and the paste hook blocks on
+            stdin until it sees the closing marker. Which one arrived is
+            decided by whether bytes are already waiting: a Tab leaves the
+            input empty, while a paste arrives with its introducer still
+            buffered.
+            """
+            nonlocal inserted
+            if self._paste_pending():
+                # A paste answers only the first request; libedit asks again
+                # for more candidates, and the placeholder is the whole answer.
+                if inserted or state:
+                    return None
+                marker = paste(text, state)
+                inserted = marker is not None
+                return None if marker is None else text + marker
+            if state == 0:
+                inserted = False
+            return None if inserted else self._complete(text, state)
+
         previous = readline.get_completer()
-        readline.set_completer(paste)
+        readline.set_completer(hook)
         readline.parse_and_bind(r'bind "^[[200~" rl_complete')
-        # Tab must not invoke the paste callback and wait for an end marker.
-        readline.parse_and_bind(r'bind "^I" ed-insert')
+        # Libedit does not bind Tab to completion on its own, unlike GNU
+        # readline, so Tab reaches no completer until this is bound.
+        readline.parse_and_bind(r'bind "^I" rl_complete')
         try:
             sys.stdout.write("\x1b[?2004h")
             sys.stdout.flush()
@@ -534,6 +631,8 @@ class Repl:
         # replaced. The reader carries over, so a test's stand-in survives.
         self.session.backend = make_backend(provider, self.session.backend.reader)
         self.settings = fresh
+        if text not in self._models:
+            self._models.append(text)
 
     def _print_config(self) -> None:
         """Print the settings in effect, reading live values where they can change.

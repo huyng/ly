@@ -513,6 +513,27 @@ def test_create_agent_session_binds_tools_to_the_requested_cwd(tmp_path):
     }
 
 
+def test_create_agent_session_wants_a_provider_with_its_model():
+    """The SDK boundary follows the same rule as the CLI: the endpoint comes
+    from the model's provider half, so a bare name is refused there too."""
+    from ly import create_agent_session
+    from ly.providers.errors import UnknownProviderError
+
+    session = create_agent_session(
+        model="deepseek/deepseek-chat",
+        api_key="test-key",
+        persistent=False,
+    )
+    provider = session.backend.provider
+    assert (provider.base_url, provider.model) == (
+        "https://api.deepseek.com",
+        "deepseek-chat",
+    )
+
+    with pytest.raises(UnknownProviderError):
+        create_agent_session(model="gpt-4.1", api_key="test-key", persistent=False)
+
+
 def failing_backend(reason, *, retryable=False):
     class FailingBackend(FakeBackend):
         api = "fake"
@@ -677,7 +698,9 @@ def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
                     },
                 }
 
-    provider = Provider(base_url="https://explicit.example/v1", api_key="test", api=api)
+    provider = Provider(
+        model="m", base_url="https://explicit.example/v1", api_key="test", api=api
+    )
     backend = make_backend(provider, FakeReader)
     session = AgentSession(
         backend=backend,

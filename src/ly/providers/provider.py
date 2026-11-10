@@ -8,20 +8,17 @@ instead of being shadowed by a copy taken inside the backend.
 
 from .errors import MissingBaseURLError, MissingCredentialsError
 
-#: Used when the caller does not name a model.
-DEFAULT_MODEL = "gpt-4.1"
-
 
 class Provider:
     """Model choice and credentials; read by a backend on every request."""
 
     def __init__(
         self,
-        model: str = DEFAULT_MODEL,
+        model: str,
         base_url: str = "",
         api_key: str = "",
         api: str = "chat",
-        pass_reasoning_content: bool | None = None,
+        pass_reasoning_content: bool = False,
     ):
         if not api_key:
             # Raised here, at construction, so callers fail before any work.
@@ -30,16 +27,13 @@ class Provider:
         if not base_url:
             raise MissingBaseURLError()
 
-        # DeepSeek thinking mode requires reasoning_content to be echoed back
-        # when tools are present. Other providers (e.g. z.ai) keep the previous
-        # behavior unless the caller opts in.
-        if pass_reasoning_content is None:
-            pass_reasoning_content = "deepseek" in base_url
-
         self.model = model
         self.base_url = base_url
         # "chat" for `/chat/completions`, "responses" for `/responses`; the
         # latter is the only route to tools on OpenAI's newest models.
         self.api = (api or "chat").strip().lower()
         self.api_key = api_key
+        # Which endpoint needs `reasoning_content` echoed back is a fact about
+        # the provider, so it arrives here resolved rather than guessed from the
+        # URL: a preset pointed at a proxy still speaks its own dialect.
         self.pass_reasoning_content = pass_reasoning_content

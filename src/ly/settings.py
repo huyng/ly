@@ -100,15 +100,21 @@ def _presets_from_file(data: dict) -> dict[str, Preset]:
         if not isinstance(entry, dict):
             continue
         given: dict = {}
-        for key in ("base_url", "model"):
-            value = entry.get(key)
-            if isinstance(value, str) and value:
-                given[key] = value
+        base_url = entry.get("base_url")
+        if isinstance(base_url, str) and base_url:
+            given["base_url"] = base_url
         if entry.get("api") in API_KINDS:
             given["api"] = entry["api"]
+        # A declared provider that speaks DeepSeek's dialect needs this false
+        # flag turned on; the environment can still override it per run.
+        if isinstance(entry.get("pass_reasoning_content"), bool):
+            given["pass_reasoning_content"] = entry["pass_reasoning_content"]
         key_env = entry.get("key_env")
         if isinstance(key_env, list):
             given["key_env"] = tuple(v for v in key_env if isinstance(v, str))
+        models = entry.get("models")
+        if isinstance(models, list):
+            given["models"] = tuple(v for v in models if isinstance(v, str))
         # A new provider without an endpoint says nothing a default could fill
         # in; a known one keeps the endpoint it already has.
         if "base_url" not in given and name not in BUILT_IN:
@@ -149,6 +155,7 @@ def _apply_preset(values: dict, preset: Preset, env: Mapping[str, str]) -> None:
     """Fill the values the user did not set from the preset the model names."""
     values.setdefault("base_url", preset.base_url)
     values.setdefault("api", preset.api)
+    values.setdefault("pass_reasoning_content", preset.pass_reasoning_content)
     if values.get("api_key"):
         return
     # Nothing generic was exported, so fall back to the provider's own variable.
@@ -217,8 +224,10 @@ class Settings:
     base_url: str | None = None
     api: str | None = None
     api_key: str | None = None
-    # None lets the provider decide from the base URL; see `Provider`.
-    pass_reasoning_content: bool | None = None
+    # Resolved by `load` from the preset; `LY_PASS_REASONING_CONTENT` overrides.
+    # A provider named by hand gets False, which is what every non-DeepSeek
+    # endpoint wants.
+    pass_reasoning_content: bool = False
     # None asks the CLI for `sandbox.DEFAULT_IMAGE`; the settings file does not
     # carry this key, because the image belongs to the host that starts Docker.
     image: str | None = None
@@ -238,6 +247,9 @@ class Settings:
         path: str | Path | None = None,
         env: dict | None = None,
         model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        api: str | None = None,
     ) -> "Settings":
         """Merge the settings file and the environment, environment winning.
 
@@ -248,6 +260,12 @@ class Settings:
             model: Model reference to use instead of the one the file or
                 environment names. A reference naming no known provider is
                 kept, and refused later by `make_provider`.
+            base_url: Endpoint to use instead of the one the model's provider
+                supplies, which is how a preset is pointed at a proxy. The
+                provider half still has to name a preset: an endpoint alone
+                does not say which wire format or key variable to use.
+            api_key: Key to use instead of the one the environment supplies.
+            api: Wire format, `chat` or `responses`; ignored otherwise.
 
         Returns:
             The merged settings, with defaults for keys neither source supplies
@@ -261,8 +279,16 @@ class Settings:
         # a unit: LY_COMPACT_THRESHOLD can win while a file's keep_turns stays.
         compaction = values.pop("compaction", {}) | env_values.pop("compaction", {})
         values |= env_values
-        if model is not None:
-            values["model"] = model
+        # These are what a caller passes; `None` means it passed nothing and
+        # the merged sources stand. They win over both, because the caller is
+        # nearer than either.
+        given = {
+            "model": model,
+            "base_url": base_url,
+            "api_key": api_key,
+            "api": api if api in API_KINDS else None,
+        }
+        values |= {name: value for name, value in given.items() if value}
         values.setdefault("model", DEFAULT_MODEL)
         # The provider half of the model is what picks the endpoint and the
         # variable the key hides in. A half that matches no preset is not an

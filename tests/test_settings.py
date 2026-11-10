@@ -149,12 +149,19 @@ def test_the_sessions_directory_is_resolved_here_and_the_mount_wins():
     assert mounted == Path("/sessions")
 
 
-def test_pass_reasoning_content_is_tri_state():
-    assert Settings.load(env={}).pass_reasoning_content is None
-    yes = Settings.load(env={"LY_PASS_REASONING_CONTENT": "yes"})
-    assert yes.pass_reasoning_content
+def test_pass_reasoning_content_comes_from_the_provider():
+    """DeepSeek needs the field echoed back and OpenAI rejects it, so which
+    one is in play decides it. The environment can override either way."""
+    deepseek = {"LY_MODEL": "deepseek/deepseek-chat"}
+    openai = {"LY_MODEL": "openai/gpt-4.1"}
+
+    assert Settings.load(env=deepseek).pass_reasoning_content
+    assert not Settings.load(env=openai).pass_reasoning_content
     assert not Settings.load(
-        env={"LY_PASS_REASONING_CONTENT": "off"}
+        env={**deepseek, "LY_PASS_REASONING_CONTENT": "off"}
+    ).pass_reasoning_content
+    assert Settings.load(
+        env={**openai, "LY_PASS_REASONING_CONTENT": "yes"}
     ).pass_reasoning_content
 
 
@@ -360,6 +367,27 @@ def test_a_file_provider_can_be_named(tmp_path):
         "house-model",
         "sk-gw",
     )
+    # A gateway that speaks DeepSeek's dialect says so once, here.
+    assert not settings.pass_reasoning_content
+
+
+def test_a_file_provider_can_declare_the_reasoning_field(tmp_path):
+    path = write(
+        tmp_path,
+        {
+            "model": "mygateway/house-model",
+            "providers": {
+                "mygateway": {
+                    "base_url": "https://gw.test/v1",
+                    "pass_reasoning_content": True,
+                }
+            },
+        },
+    )
+
+    settings = Settings.load(path, env={"LY_API_KEY": "sk"})
+
+    assert settings.make_provider().pass_reasoning_content
 
 
 def test_a_file_provider_can_point_a_built_in_at_a_proxy(tmp_path):
@@ -376,8 +404,41 @@ def test_a_file_provider_can_point_a_built_in_at_a_proxy(tmp_path):
     assert settings.model == "openai/gpt-4.1"
 
 
+def test_a_proxied_provider_keeps_its_own_dialect(tmp_path):
+    """Regression: the reasoning flag was guessed from the base URL, so
+    pointing the deepseek preset at a proxy silently turned it off."""
+    path = write(
+        tmp_path,
+        {"providers": {"deepseek": {"base_url": "https://proxy.corp.test/v1"}}},
+    )
+
+    settings = Settings.load(
+        path, env={"LY_MODEL": "deepseek/deepseek-chat", "LY_API_KEY": "sk"}
+    )
+
+    assert settings.make_provider().pass_reasoning_content
+
+
+def test_a_file_provider_can_list_its_models(tmp_path):
+    path = write(
+        tmp_path,
+        {
+            "providers": {
+                "mygateway": {
+                    "base_url": "https://gw.test/v1",
+                    "models": ["house-model", "house-fast"],
+                }
+            }
+        },
+    )
+
+    settings = Settings.load(path, env={})
+
+    assert settings.presets["mygateway"].models == ("house-model", "house-fast")
+
+
 def test_a_provider_entry_without_a_base_url_is_ignored(tmp_path):
-    path = write(tmp_path, {"providers": {"broken": {"model": "m"}}})
+    path = write(tmp_path, {"providers": {"broken": {"api": "responses"}}})
 
     assert set(Settings.load(path, env={}).presets) == {"openai", "deepseek"}
 

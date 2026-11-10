@@ -4,7 +4,7 @@ Exposes an SDK-style factory, mirroring pi's `createAgentSession()`:
 
     from ly import create_agent_session
 
-    session = create_agent_session()
+    session = create_agent_session(model="openai/gpt-4.1")
     session.prompt("What files are in the current directory?")
     print(session.last_assistant_text())
     session.dispose()
@@ -39,21 +39,27 @@ def create_agent_session(
     used.
 
     Args:
+        model: A `provider/model` reference, such as `deepseek/deepseek-chat`.
+            The provider half names a preset, which supplies the endpoint.
         sessions_dir: Where session JSONL files go. Left unset, a persistent
             session uses `DEFAULT_SESSIONS_DIR`; `persistent=False` writes
             nothing at all and keeps the transcript in memory.
     """
+    from .presets import DEFAULT_MODEL
     from .prompts import build_system_prompt
-    from .providers import Provider, make_backend
-    from .providers.provider import DEFAULT_MODEL
-    from .settings import DEFAULT_SESSIONS_DIR
+    from .providers import make_backend
+    from .settings import DEFAULT_SESSIONS_DIR, Settings
 
-    provider = Provider(
+    # One resolution path: the reference names its endpoint, wire format and
+    # key variable, so nothing here restates a default the CLI would not use.
+    settings = Settings.load(
+        env={},
         model=model or DEFAULT_MODEL,
-        base_url=base_url or "",
-        api_key=api_key or "",
-        api=api or "chat",
+        base_url=base_url,
+        api_key=api_key,
+        api=api,
     )
+    provider = settings.make_provider()
     # The SDK takes its configuration as arguments, so the default lives here
     # rather than in `SessionManager`, which holds no path of its own. Only the
     # CLI reads `LY_SESSIONS_DIR`, through `Settings`.

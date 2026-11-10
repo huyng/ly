@@ -19,7 +19,8 @@ uv tool install git+https://github.com/huyng/ly
 A model is always written `provider/model`. The provider half names a preset,
 and a preset knows the endpoint, the wire format and which variable its key
 hides in, so the only thing you supply is the key. DeepSeek and OpenAI are
-built in; any other OpenAI-compatible endpoint can be named by hand.
+built in; any other OpenAI-compatible endpoint is declared once in the
+settings file.
 
 ```bash
 export LY_MODEL=deepseek/deepseek-flash
@@ -33,9 +34,13 @@ export LY_API_KEY=sk-
 ```
 
 ```bash
-export LY_MODEL=mygateway/house-model   # your own endpoint, see Settings file
-export LY_BASE_URL=https://gw.internal/v1
+export LY_MODEL=mygateway/house-model   # after declaring `mygateway` below
+export MYGW_API_KEY=sk-
 ```
+
+The provider half has to be one ly knows, so a private endpoint is declared
+once under `providers` in the settings file rather than typed with
+`LY_BASE_URL`; see [Settings file](#settings-file).
 
 ### Environment variables
 
@@ -48,7 +53,7 @@ one exists. These are read by `ly` itself:
 | `LY_API_KEY` | — | API key for the provider (required, unless the preset's own variable is set) |
 | `LY_BASE_URL` | from the preset | OpenAI-compatible base URL, such as `https://api.openai.com/v1` |
 | `LY_API` | `chat` | Wire format: `chat` for `/chat/completions`, `responses` for `/responses` |
-| `LY_PASS_REASONING_CONTENT` | on when the base URL contains `deepseek` | Echo `reasoning_content` back on tool calls, which DeepSeek requires. `0`, `false`, `no` or `off` turns it off |
+| `LY_PASS_REASONING_CONTENT` | from the preset: on for `deepseek` | Echo `reasoning_content` back on tool calls, which DeepSeek requires. `0`, `false`, `no` or `off` turns it off |
 | `LY_DOCKER` | `1` | Set to `0` to run on the host instead of in Docker (same as `--nosandbox`) |
 | `LY_DOCKER_IMAGE` | `python:3.12` | Image to run in when sandboxed (same as `--sandbox`) |
 | `LY_SESSIONS_DIR` | `~/.ly/sessions` | Where session JSONL files are written |
@@ -118,14 +123,18 @@ Define more providers under `providers`, then name one in the model:
     "mygateway": {
       "base_url": "https://gw.internal/v1",
       "api": "chat",
-      "key_env": ["MYGW_API_KEY"]
+      "key_env": ["MYGW_API_KEY"],
+      "pass_reasoning_content": false,
+      "models": ["house-model", "house-fast"]
     }
   }
 }
 ```
 
 An entry merges over the built-in provider of the same name, so routing
-`openai` through a proxy is one key and its key variable stays as it was:
+`openai` through a proxy is one key, and the endpoint's other facts — wire
+format, key variable, whether tool calls echo `reasoning_content` — stay as
+they were. Only `base_url` is usually worth setting:
 
 ```json
 { "providers": { "openai": { "base_url": "https://proxy.example.com/v1" } } }
@@ -147,7 +156,10 @@ LY_MODEL=deepseek/deepseek-flash ly # one run, one model
 `/model deepseek/deepseek-flash` switches mid-session, keeping the transcript.
 The endpoint, the key, the wire format and the model all move together,
 because they are one provider's facts rather than four settings you have to
-keep in step. `/model` alone prints what is in force.
+keep in step. `/model` alone prints what is in force. Tab completes the
+provider, then that provider's models, then any reference this session has
+already used. The model list is a hand-written guide in `ly/presets.py`, not a
+gate: `/model` sends whatever you type.
 
 ```bash
 ly> /model deepseek/deepseek-flash  # endpoint, key and model at once

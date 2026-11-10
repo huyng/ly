@@ -61,6 +61,110 @@ def make_repl(threshold_tokens: int = 100_000, enabled: bool = True) -> Repl:
     return Repl(session, Theme(enabled=False))
 
 
+def test_tab_completes_the_provider_half_of_a_model():
+    repl = make_repl()
+
+    # The reference in use leads the candidates, so Enter on it keeps it.
+    assert repl._completions("/model ") == [
+        "deepseek/",
+        "openai/",
+        "openai/gpt-4.1",
+    ]
+    assert repl._completions("/model de") == ["deepseek/"]
+    assert repl._completions("/model x") == []
+
+
+def test_tab_completes_the_models_a_provider_lists():
+    repl = make_repl()
+
+    assert repl._completions("/model deepseek/") == [
+        "deepseek/deepseek-chat",
+        "deepseek/deepseek-reasoner",
+    ]
+    assert repl._completions("/model deepseek/deepseek-r") == [
+        "deepseek/deepseek-reasoner"
+    ]
+
+
+def test_tab_offers_a_reference_this_session_used():
+    """The preset list is a guide, not the whole truth, so a reference you
+    already typed is offered even when no preset names it."""
+    repl = make_repl()
+    repl._models.append("deepseek/deepseek-coder")
+
+    assert repl._completions("/model deepseek/deepseek-c") == [
+        "deepseek/deepseek-chat",
+        "deepseek/deepseek-coder",
+    ]
+
+
+def test_tab_is_quiet_outside_a_model_reference():
+    repl = make_repl()
+    repl._models.append("deepseek/deepseek-chat")
+
+    # Nothing after a complete reference: the line is done, not half-typed.
+    assert repl._completions("/model deepseek/deepseek-chat ") == []
+    assert repl._completions("/config") == []
+    assert repl._completions("explain this") == []
+
+
+def test_switching_model_remembers_the_reference_for_tab(monkeypatch, capsys):
+    monkeypatch.setenv("LY_API_KEY", "test-key")
+    repl = make_repl()
+
+    repl._command("/model deepseek/deepseek-chat")
+
+    assert repl._models == ["openai/gpt-4.1", "deepseek/deepseek-chat"]
+    assert repl._completions("/model deepseek/deepseek-chat") == [
+        "deepseek/deepseek-chat"
+    ]
+
+
+def complete_at(repl, line, text):
+    """Answers for one Tab, plus the line each answer would produce."""
+    import readline
+
+    readline.get_line_buffer = lambda: line
+    start = len(line) - len(text)
+    answers = []
+    for state in range(5):
+        answer = repl._complete(text, state)
+        if answer is None:
+            break
+        answers.append(line[:start] + answer)
+    return answers
+
+
+def test_tab_after_the_slash_offers_the_model_alone():
+    """Regression: libedit breaks the word at `/`, so a full reference came
+    back as `/model deepseek/deepseek/deepseek-...`."""
+    repl = make_repl()
+
+    assert complete_at(repl, "/model deepseek/", "") == [
+        "/model deepseek/deepseek-chat",
+        "/model deepseek/deepseek-reasoner",
+    ]
+
+
+def test_tab_keeps_the_provider_when_readline_breaks_on_slashes():
+    repl = make_repl()
+
+    assert complete_at(repl, "/model deepseek/deepseek-r", "deepseek-r") == [
+        "/model deepseek/deepseek-reasoner"
+    ]
+
+
+def test_tab_offers_the_whole_reference_when_the_word_is_the_reference():
+    """GNU readline treats the reference as one word, so the candidate has to
+    carry the provider with it."""
+    repl = make_repl()
+
+    assert complete_at(repl, "/model deepseek/d", "deepseek/d") == [
+        "/model deepseek/deepseek-chat",
+        "/model deepseek/deepseek-reasoner",
+    ]
+
+
 def test_config_shows_the_settings_in_effect(capsys):
     repl = make_repl(threshold_tokens=8000)
     repl.session.set_model("switched-model")

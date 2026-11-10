@@ -30,7 +30,8 @@ def test_gnu_readline_enables_bracketed_paste(monkeypatch):
     monkeypatch.setattr(readline, "parse_and_bind", bindings.append)
     monkeypatch.setattr("builtins.input", lambda prompt: "first\nsecond")
     assert Repl.__new__(Repl)._read("") == "first\nsecond"
-    assert bindings == ["set enable-bracketed-paste on"]
+    # Bracketed paste leaves Tab inserting a literal tab, so it is rebound.
+    assert bindings == ["set enable-bracketed-paste on", "tab: complete"]
 
 
 @pytest.mark.parametrize(
@@ -58,6 +59,180 @@ def test_prompt_color_does_not_count_as_visible_columns(monkeypatch, backend, ex
     monkeypatch.setattr(Repl, "_read_libedit", lambda self, prompt: capture(prompt))
     assert Repl.__new__(Repl)._read(Theme(enabled=True).accent("» ")) == "hello"
     assert prompts == [expected]
+
+
+class FakeTTY:
+    """The parts of a terminal that the libedit hook touches."""
+
+    def __init__(self, fd):
+        self._fd = fd
+        self.encoding = "utf-8"
+
+    def fileno(self):
+        return self._fd
+
+    def isatty(self):
+        return True
+
+
+def as_libedit(monkeypatch):
+    """Make `Repl._read` take the libedit path, as it does on macOS."""
+    import readline
+
+    monkeypatch.setattr(
+        readline,
+        "__doc__",
+        "Importing this module enables command line editing using libedit.",
+    )
+
+
+def libedit_repl():
+    from ly.settings import Settings
+
+    repl = Repl.__new__(Repl)
+    repl._pastes = {}
+    repl.settings = Settings.load(env={"LY_MODEL": "openai/gpt-4.1", "LY_API_KEY": "k"})
+    repl._models = [repl.settings.model]
+    return repl
+
+
+def ask_completer(text, answers, states=3):
+    """Ask the installed completer the way readline/libedit does."""
+    import readline
+
+    completer = readline.get_completer()
+    assert completer is not None  # the read installs one before asking
+    for state in range(states):
+        answer = completer(text, state)
+        if answer is None:
+            break
+        answers.append(answer)
+
+
+def test_libedit_binds_tab_to_completion(monkeypatch):
+    """Regression: libedit binds Tab to nothing on its own, so removing the
+    paste hook's `ed-insert` binding left Tab doing nothing on macOS."""
+    import readline
+
+    bindings = []
+    # Captured during the read: the restore after it binds Tab too, so asking
+    # afterwards would pass whether or not Tab was bound while typing.
+    during = []
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(readline, "parse_and_bind", bindings.append)
+    as_libedit(monkeypatch)
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt: during.append(list(bindings)) or "hello"
+    )
+
+    repl = libedit_repl()
+    assert repl._read("") == "hello"
+    assert 'bind "^I" rl_complete' in during[0]
+
+
+def test_libedit_tab_reaches_completion(monkeypatch):
+    import readline
+
+    readable, writable = os.pipe()
+    answers = []
+
+    def fake_input(prompt):
+        ask_completer("de", answers)
+        return "x"
+
+    as_libedit(monkeypatch)
+    monkeypatch.setattr(sys, "stdin", FakeTTY(readable))
+    monkeypatch.setattr(readline, "get_line_buffer", lambda: "/model de")
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    libedit_repl()._read("")
+
+    assert answers == ["deepseek/"]
+
+    os.close(readable)
+    os.close(writable)
+
+
+def test_libedit_paste_still_becomes_a_placeholder(monkeypatch):
+    import readline
+
+    readable, writable = os.pipe()
+    os.write(writable, "first\nsecond\x1b[201~".encode())
+    answers = []
+
+    def fake_input(prompt):
+        ask_completer("", answers)
+        return "x"
+
+    as_libedit(monkeypatch)
+    monkeypatch.setattr(sys, "stdin", FakeTTY(readable))
+    monkeypatch.setattr(readline, "get_line_buffer", lambda: "/model ")
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    repl = libedit_repl()
+    repl._read("")
+
+    assert len(answers) == 1
+    assert answers[0].startswith("[paste ")
+    assert list(repl._pastes.values()) == ["first\nsecond"]
+
+    os.close(readable)
+    os.close(writable)
+
+
+def test_a_waiting_paste_is_told_apart_from_a_key_press(monkeypatch):
+    """Libedit sends both Tab and pastes to one hook; only a paste arrives
+    with bytes already buffered, which is what decides the branch."""
+    repl = Repl.__new__(Repl)
+    monkeypatch.setattr(select, "select", lambda readers, w, x, timeout: [readers])
+    assert repl._paste_pending()
+    monkeypatch.setattr(select, "select", lambda readers, w, x, timeout: [[], [], []])
+    assert not repl._paste_pending()
+
+
+def test_terminal_tab_completes_a_model_reference():
+    """Tab reaches completion on the readline in use.
+
+    On libedit the same entry point serves bracket pastes, so this also covers
+    the dispatch that keeps Tab out of the paste reader.
+    """
+    code = """
+import json
+from ly.cli import Repl
+from ly.settings import Settings
+repl = Repl.__new__(Repl)
+repl._pastes = {}
+repl.settings = Settings.load(env={'LY_MODEL': 'openai/gpt-4.1', 'LY_API_KEY': 'k'})
+repl._models = [repl.settings.model]
+text = repl._read('PROMPT> ')
+print('RESULT=' + json.dumps(text), flush=True)
+"""
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.environ["TERM"] = "xterm-256color"
+        os.execv(sys.executable, [sys.executable, "-c", code])
+
+    output = bytearray()
+
+    def until(marker: bytes) -> None:
+        while marker not in output:
+            assert select.select([fd], [], [], 5)[0], bytes(output)
+            chunk = os.read(fd, 65536)
+            assert chunk, bytes(output)
+            output.extend(chunk)
+
+    try:
+        until(b"PROMPT> ")
+        os.write(fd, b"/model dee\t")
+        until(b"deepseek/")
+        os.write(fd, b"deepseek-chat\r")
+        until(b"RESULT=")
+        result = bytes(output).split(b"RESULT=", 1)[1].splitlines()[0]
+        assert json.loads(result) == "/model deepseek/deepseek-chat"
+    finally:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        os.close(fd)
 
 
 def test_terminal_ctrl_a_and_ctrl_e_with_colored_prompt():

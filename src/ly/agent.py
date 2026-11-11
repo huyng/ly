@@ -13,10 +13,10 @@ import threading
 from collections.abc import Callable
 
 from .compaction import (
-    SUMMARY_PREFIX,
     CompactionConfig,
     estimate_tokens,
     split_index,
+    summary_message,
     summarize,
 )
 from .events import (
@@ -197,7 +197,7 @@ class AgentSession:
             asst_message = AssistantMessage(
                 content=[],
                 model=self.backend.provider.model,
-                api=self.backend.api,
+                api_format=self.backend.api_format,
                 stop_reason="aborted",
             )
             self.session_manager.append(asst_message)
@@ -263,10 +263,8 @@ class AgentSession:
             self._emit(ErrorEvent(message=f"compaction failed: {exc}"))
             return False
 
-        summary_message = UserMessage(
-            content=f"{SUMMARY_PREFIX}\n{summary}\n</conversation_summary>"
-        )
-        tokens_after = estimate_tokens([summary_message, *keep])
+        message = summary_message(summary)
+        tokens_after = estimate_tokens([message, *keep])
         if tokens_after >= tokens_before:
             # A branch that is short, or mostly one huge tool result the model
             # summarized at length, can summarize to something *bigger* than
@@ -284,7 +282,7 @@ class AgentSession:
 
         if self._abort_event.is_set():
             return False
-        self.session_manager.compact(summary_message, keep)
+        self.session_manager.compact(message, keep)
         self._emit(
             CompactionEndEvent(
                 messages=len(older),
@@ -347,7 +345,7 @@ class AgentSession:
         error = AssistantMessage(
             content=[],
             model=self.backend.provider.model,
-            api=self.backend.api,
+            api_format=self.backend.api_format,
             stop_reason="error",
             error_message=str(last_error),
         )

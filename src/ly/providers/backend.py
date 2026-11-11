@@ -47,7 +47,7 @@ class ModelBackend:
     how the stream is interpreted.
     """
 
-    api = ""
+    api_format = ""
 
     def __init__(self, provider: Provider, reader: type[StreamReader] | None = None):
         self.provider = provider
@@ -87,7 +87,7 @@ _STOP_REASONS = {
 class ChatCompletionsBackend(ModelBackend):
     """One `messages` array in, `choices[0].delta` out."""
 
-    api = "openai-completions"
+    api_format = "openai-completions"
 
     def _request_messages(
         self,
@@ -292,7 +292,7 @@ class ChatCompletionsBackend(ModelBackend):
         return AssistantMessage(
             content=content,
             model=self.provider.model,
-            api=self.api,
+            api_format=self.api_format,
             stop_reason="aborted" if aborted else stop_reason,
             usage=usage,
             error_message=failure_reason,
@@ -326,7 +326,7 @@ def new_call_id() -> str:
 class ResponsesBackend(ModelBackend):
     """Streaming backend for OpenAI's /v1/responses endpoint."""
 
-    api = "openai-responses"
+    api_format = "openai-responses"
 
     def _input_items(self, messages: list[AgentMessage]) -> list[dict[str, Any]]:
         """Convert the transcript into Responses input items.
@@ -549,7 +549,7 @@ class ResponsesBackend(ModelBackend):
         return AssistantMessage(
             content=content,
             model=self.provider.model,
-            api=self.api,
+            api_format=self.api_format,
             stop_reason="aborted" if aborted else stop_reason,
             usage=usage,
             error_message=failure_reason,
@@ -624,14 +624,14 @@ def make_backend(
 
     Args:
         provider: The endpoint, credentials, model and wire format to read on
-            each request. `provider.api` picks the backend; unknown names are
-            treated as chat-completions, so a blank value picks the common
+            each request. `provider.api_format` picks the backend; unknown names
+            are treated as chat-completions, so a blank value picks the common
             flavour.
         reader: Stand-in for the HTTP layer, for tests.
 
     Returns:
         A backend bound to `provider`.
     """
-    if provider.api == "responses":
+    if provider.api_format == "openai-responses":
         return ResponsesBackend(provider, reader)
     return ChatCompletionsBackend(provider, reader)

@@ -3,7 +3,7 @@
 Structure:
     AgentMessage
     ├── UserMessage: content (text)
-    ├── AssistantMessage: content (list of blocks), model, api, usage, …
+    ├── AssistantMessage: content (list of blocks), model, api_format, …
     │   ├── TextContent: text
     │   └── ToolCall: id, name, arguments
     └── ToolResultMessage: tool_call_id, tool_name, output, is_error
@@ -96,7 +96,7 @@ class AssistantMessage:
     Args:
         content: Ordered text and tool-call blocks; may be empty on failure.
         model: Model identifier used to generate the response.
-        api: API format, not service identity: 'openai-completions' or
+        api_format: Wire format, not service identity: 'openai-completions' or
             'openai-responses'. Empty when unspecified; does not route requests.
         stop_reason: 'stop' for completion, 'toolUse' for tool calls, 'length'
             for a limit, 'error' for failure, or 'aborted' for cancellation.
@@ -112,7 +112,7 @@ class AssistantMessage:
     content: list[TextContent | ToolCall]
     model: str
 
-    api: str = ""
+    api_format: str = ""
     stop_reason: str = "stop"  # stop | toolUse | length | error | aborted
     usage: Usage = field(default_factory=Usage)
     error_message: str | None = None
@@ -165,7 +165,7 @@ def serialize_message(message: AgentMessage) -> dict[str, Any]:
 
     elif isinstance(message, AssistantMessage):
         data["model"] = message.model
-        data["api"] = message.api
+        data["api_format"] = message.api_format
         data["stopReason"] = message.stop_reason
         data["usage"] = {
             "input": message.usage.input,
@@ -219,14 +219,7 @@ def deserialize_message(data: dict[str, Any]) -> AgentMessage:
         message = AssistantMessage(
             content=content,
             model=data["model"],
-            # Legacy logs used adapter names as providers, not service identities.
-            api=data.get(
-                "api",
-                {
-                    "openai": "openai-completions",
-                    "openai-responses": "openai-responses",
-                }.get(data.get("provider", ""), ""),
-            ),
+            api_format=data["api_format"],
             stop_reason=data["stopReason"],
             usage=Usage(
                 input=data["usage"]["input"],

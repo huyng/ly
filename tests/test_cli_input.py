@@ -190,6 +190,71 @@ def test_a_waiting_paste_is_told_apart_from_a_key_press(monkeypatch):
     assert not repl._paste_pending()
 
 
+class Terminal:
+    """A separate interpreter on its own terminal, driven by output markers.
+
+    A pty of its own keeps pytest's terminal state out of the run, and every
+    wait is a handshake on output rather than a sleep, so input sent in chunks
+    is read as it arrives. The child gets `TERM` because readline decides what
+    escapes it may emit from it.
+    """
+
+    def __init__(self, code: str):
+        self.code = code
+        self.output = bytearray()
+        self.pid = 0
+        self.fd = 0
+
+    def __enter__(self) -> "Terminal":
+        self.pid, self.fd = pty.fork()
+        if self.pid == 0:
+            os.environ["TERM"] = "xterm-256color"
+            os.execv(sys.executable, [sys.executable, "-c", self.code])
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        os.kill(self.pid, signal.SIGKILL)
+        os.waitpid(self.pid, 0)
+        os.close(self.fd)
+
+    def _read_more(self) -> None:
+        """Take the next chunk, failing with what arrived if none comes."""
+        assert select.select([self.fd], [], [], 5)[0], bytes(self.output)
+        chunk = os.read(self.fd, 65536)
+        assert chunk, bytes(self.output)
+        self.output.extend(chunk)
+
+    def until(self, marker: bytes) -> None:
+        """Read until `marker` appears."""
+        while marker not in self.output:
+            self._read_more()
+
+    def send(self, data: bytes) -> int:
+        """Write `data`, returning how many bytes the terminal took."""
+        return os.write(self.fd, data)
+
+    def clear(self) -> None:
+        self.output.clear()
+
+    def json_after(self, marker: bytes) -> object:
+        """The JSON value the child printed on the line after `marker`.
+
+        The line is read to its newline: the marker can arrive in a chunk of
+        its own, leaving the value it introduces still on its way.
+        """
+        self.until(marker)
+        while b"\n" not in bytes(self.output).split(marker, 1)[1]:
+            self._read_more()
+        return json.loads(bytes(self.output).split(marker, 1)[1].splitlines()[0])
+
+
+def on_libedit() -> bool:
+    """Whether the readline in this interpreter is libedit, as on macOS."""
+    import readline
+
+    return "libedit" in (readline.__doc__ or "")
+
+
 def test_terminal_tab_completes_a_model_reference():
     """Tab reaches completion on the readline in use.
 
@@ -207,32 +272,12 @@ repl._models = [repl.settings.model]
 text = repl._read('PROMPT> ')
 print('RESULT=' + json.dumps(text), flush=True)
 """
-    pid, fd = pty.fork()
-    if pid == 0:
-        os.environ["TERM"] = "xterm-256color"
-        os.execv(sys.executable, [sys.executable, "-c", code])
-
-    output = bytearray()
-
-    def until(marker: bytes) -> None:
-        while marker not in output:
-            assert select.select([fd], [], [], 5)[0], bytes(output)
-            chunk = os.read(fd, 65536)
-            assert chunk, bytes(output)
-            output.extend(chunk)
-
-    try:
-        until(b"PROMPT> ")
-        os.write(fd, b"/model dee\t")
-        until(b"deepseek/")
-        os.write(fd, b"deepseek-chat\r")
-        until(b"RESULT=")
-        result = bytes(output).split(b"RESULT=", 1)[1].splitlines()[0]
-        assert json.loads(result) == "/model deepseek/deepseek-chat"
-    finally:
-        os.kill(pid, signal.SIGKILL)
-        os.waitpid(pid, 0)
-        os.close(fd)
+    with Terminal(code) as terminal:
+        terminal.until(b"PROMPT> ")
+        terminal.send(b"/model dee\t")
+        terminal.until(b"deepseek/")
+        terminal.send(b"deepseek-chat\r")
+        assert terminal.json_after(b"RESULT=") == "/model deepseek/deepseek-chat"
 
 
 def test_terminal_tab_completes_a_slash_command():
@@ -246,32 +291,12 @@ repl.settings = None
 text = repl._read('PROMPT> ')
 print('RESULT=' + json.dumps(text), flush=True)
 """
-    pid, fd = pty.fork()
-    if pid == 0:
-        os.environ["TERM"] = "xterm-256color"
-        os.execv(sys.executable, [sys.executable, "-c", code])
-
-    output = bytearray()
-
-    def until(marker: bytes) -> None:
-        while marker not in output:
-            assert select.select([fd], [], [], 5)[0], bytes(output)
-            chunk = os.read(fd, 65536)
-            assert chunk, bytes(output)
-            output.extend(chunk)
-
-    try:
-        until(b"PROMPT> ")
-        os.write(fd, b"/mod\t")
-        until(b"/model")
-        os.write(fd, b"\r")
-        until(b"RESULT=")
-        result = bytes(output).split(b"RESULT=", 1)[1].splitlines()[0]
-        assert json.loads(result) == "/model"
-    finally:
-        os.kill(pid, signal.SIGKILL)
-        os.waitpid(pid, 0)
-        os.close(fd)
+    with Terminal(code) as terminal:
+        terminal.until(b"PROMPT> ")
+        terminal.send(b"/mod\t")
+        terminal.until(b"/model")
+        terminal.send(b"\r")
+        assert terminal.json_after(b"RESULT=") == "/model"
 
 
 def test_terminal_ctrl_a_and_ctrl_e_with_colored_prompt():
@@ -284,42 +309,19 @@ repl._pastes = {}
 text = repl._read(Theme(enabled=True).accent('» '))
 print('RESULT=' + json.dumps(text), flush=True)
 """
-    pid, fd = pty.fork()
-    if pid == 0:
-        os.environ["TERM"] = "xterm-256color"
-        os.execv(sys.executable, [sys.executable, "-c", code])
-
-    output = bytearray()
-
-    def until(marker):
-        while marker not in output:
-            assert select.select([fd], [], [], 5)[0], bytes(output)
-            chunk = os.read(fd, 65536)
-            assert chunk, bytes(output)
-            output.extend(chunk)
-
-    try:
-        until("» ".encode())
-        os.write(fd, b"hello\x01")
+    with Terminal(code) as terminal:
+        terminal.until("» ".encode())
+        terminal.send(b"hello\x01")
         # Libedit uses absolute column positioning; GNU Readline may use
         # relative movements instead. Catch the original display bug on libedit.
-        import readline
-
-        if "libedit" in (readline.__doc__ or ""):
-            until(b"\x1b[3G")
-        os.write(fd, b"X\x05Y\r")
-        until(b'RESULT="XhelloY"')
-    finally:
-        os.kill(pid, signal.SIGKILL)
-        os.waitpid(pid, 0)
-        os.close(fd)
+        if on_libedit():
+            terminal.until(b"\x1b[3G")
+        terminal.send(b"X\x05Y\r")
+        terminal.until(b'RESULT="XhelloY"')
 
 
 @pytest.mark.parametrize("cancel", [False, True])
 def test_terminal_paste_waits_for_enter(cancel):
-    # A separate interpreter gives readline a real controlling terminal without
-    # changing pytest's terminal state. Handshakes split the paste into chunks;
-    # no sleep or assumptions about input delivery speed are needed.
     code = """
 import json
 from ly.cli import Repl
@@ -333,64 +335,42 @@ try:
 except KeyboardInterrupt:
     print('CANCELLED', flush=True)
 """
-    pid, fd = pty.fork()
-    if pid == 0:
-        os.execv(sys.executable, [sys.executable, "-c", code])
-
-    output = bytearray()
-
-    def until(marker: bytes) -> None:
-        while marker not in output:
-            assert select.select([fd], [], [], 5)[0], bytes(output)
-            chunk = os.read(fd, 65536)
-            assert chunk, bytes(output)
-            output.extend(chunk)
-
-    try:
-        until(b"PROMPT> ")
-        assert b"\x1b[?2004h" in output
+    with Terminal(code) as terminal:
+        terminal.until(b"PROMPT> ")
+        assert b"\x1b[?2004h" in terminal.output
         content = "first\n" + "\tlong café line\n" * 1000 + "\nlast\n"
-        os.write(fd, b"prefix \x1b[200~first\r")
+        terminal.send(b"prefix \x1b[200~first\r")
         # Deliver a long Unicode paste in chunks, including literal tabs and
         # trailing newlines that must not act as editor commands.
         payload = content[len("first\n") :].replace("\n", "\r").encode()
         while payload:
-            written = os.write(fd, payload[:1024])
-            payload = payload[written:]
-        os.write(fd, b"\x1b[201~")
-        import readline
-
-        if "libedit" in (readline.__doc__ or ""):
-            until(f": {len(content)} chars]".encode())
-        assert b"RESULT=" not in output
-        os.write(fd, b" suffix")
-        until(b"suffix")
-        assert b"RESULT=" not in output
+            payload = payload[terminal.send(payload[:1024]) :]
+        terminal.send(b"\x1b[201~")
+        if on_libedit():
+            terminal.until(f": {len(content)} chars]".encode())
+        assert b"RESULT=" not in terminal.output
+        terminal.send(b" suffix")
+        terminal.until(b"suffix")
+        assert b"RESULT=" not in terminal.output
         if cancel:
-            os.write(fd, b"\x03")
-            until(b"CANCELLED")
+            terminal.send(b"\x03")
+            terminal.until(b"CANCELLED")
         else:
-            os.write(fd, b"\r")
-            until(b"RESULT=")
-            until(b' suffix"')
-            result = bytes(output).split(b"RESULT=", 1)[1].splitlines()[0]
-            assert json.loads(result) == "prefix " + content + " suffix"
-            until(b"RECALL> ")
-            output.clear()
-            os.write(fd, b"\x10")
-            if "libedit" in (readline.__doc__ or ""):
-                until(f": {len(content)} chars]".encode())
+            terminal.send(b"\r")
+            assert terminal.json_after(b"RESULT=") == "prefix " + content + " suffix"
+            terminal.until(b"RECALL> ")
+            terminal.clear()
+            terminal.send(b"\x10")
+            if on_libedit():
+                terminal.until(f": {len(content)} chars]".encode())
             else:
-                until(b"prefix ")
-            assert b"RECALLED=" not in output
+                terminal.until(b"prefix ")
+            assert b"RECALLED=" not in terminal.output
             # A recalled prompt must remain editable until Enter is pressed.
-            os.write(fd, b"\x05 edited\r")
-            until(b"RECALLED=")
-            until(b' suffix edited"')
-            recalled = bytes(output).split(b"RECALLED=", 1)[1].splitlines()[0]
-            assert json.loads(recalled) == "prefix " + content + " suffix edited"
-        assert b"\x1b[?2004l" in output
-    finally:
-        os.kill(pid, signal.SIGKILL)
-        os.waitpid(pid, 0)
-        os.close(fd)
+            terminal.send(b"\x05 edited\r")
+            terminal.until(b'RECALLED="')
+            assert (
+                terminal.json_after(b"RECALLED=")
+                == "prefix " + content + " suffix edited"
+            )
+        assert b"\x1b[?2004l" in terminal.output

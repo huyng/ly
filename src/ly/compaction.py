@@ -33,14 +33,29 @@ MESSAGE_OVERHEAD_TOKENS = 4
 
 MAX_USER_CHARS = 2_000
 MAX_ASSISTANT_CHARS = 1_200
-MAX_TOOL_RESULT_CHARS = 500
+MAX_TOOL_RESULT_CHARS = 2_000
 MAX_ARG_CHARS = 200
+
+#: Threshold used when no preset knows the model's window. Roughly half a
+#: typical window, and low enough that an unknown model still compacts.
+DEFAULT_THRESHOLD_TOKENS = 100_000
 
 SUMMARY_PREFIX = (
     "<conversation_summary>\n"
     "Earlier turns were compacted to save context. This is a summary of them, "
     "not verbatim history; the code and files on disk are the source of truth."
 )
+SUMMARY_SUFFIX = "</conversation_summary>"
+
+#: A summary earns no more room than a user turn, wrapper included: it replaces
+#: turns, and bounding it here once means neither the next batch nor a later
+#: compaction has to trim it.
+MAX_SUMMARY_CHARS = MAX_USER_CHARS - len(f"{SUMMARY_PREFIX}\n\n{SUMMARY_SUFFIX}")
+
+
+def summary_message(summary: str) -> UserMessage:
+    """Wrap summary text as the user message that re-enters history."""
+    return UserMessage(content=f"{SUMMARY_PREFIX}\n{summary}\n{SUMMARY_SUFFIX}")
 
 
 SUMMARY_SYSTEM_PROMPT = """\
@@ -61,7 +76,7 @@ Preserve, with exact paths and identifiers:
 - what is still unfinished or uncertain
 
 Drop greetings, narration, and raw tool output. Do not invent details; if
-something is unknown, say so. Use bullet points. Keep it under 400 words.
+something is unknown, say so. Use bullet points. Keep it under 300 words.
 
 Previous summary (may be "(none)"):
 {summary}
@@ -80,13 +95,38 @@ class CompactionConfig:
 
     enabled: bool = True
     # Estimated tokens in the active branch at which compaction kicks in.
-    # Roughly half of a 200k-token window; override for smaller models.
-    threshold_tokens: int = 100_000
+    # Sizes a model's window implies are in `for_window`; override for taste.
+    threshold_tokens: int = DEFAULT_THRESHOLD_TOKENS
     # Recent user turns kept verbatim. Everything older is summarized.
     keep_turns: int = 4
     # Upper bound on a single summarization request; longer histories are
-    # summarized in batches, each folding in the previous summary.
-    max_summary_input_tokens: int = 30_000
+    # summarized in batches, each folding in the previous summary. Equal to the
+    # threshold by default, since a branch never holds more than that when it
+    # triggers, so one pass can read the whole history.
+    max_summary_input_tokens: int = DEFAULT_THRESHOLD_TOKENS
+
+
+def for_window(window: int) -> CompactionConfig:
+    """Compaction defaults sized to one model's context window.
+
+    Half the window, so the request and the reply always fit, however large the
+    window is: a bigger model is worth a longer verbatim history. The summary
+    cap is that same half rather than a second guess at the window, since
+    compaction triggers there and the history to summarize cannot be longer, so
+    one pass reads all of it.
+
+    Args:
+        window: Tokens the model accepts.
+
+    Returns:
+        A config that compacts at half the window and summarizes in one pass up
+        to the same size. `keep_turns` keeps its own default, since it counts
+        turns rather than tokens.
+    """
+    threshold = window // 2
+    return CompactionConfig(
+        threshold_tokens=threshold, max_summary_input_tokens=threshold
+    )
 
 
 def estimate_tokens(messages: list[AgentMessage]) -> int:
@@ -167,7 +207,7 @@ def summarize(
         if abort_event is not None and abort_event.is_set():
             raise RuntimeError("compaction aborted")
         request = SUMMARY_REQUEST.format(
-            summary=_clip(summary.strip(), MAX_USER_CHARS) or "(none)",
+            summary=summary.strip() or "(none)",
             transcript=render_transcript(batch),
         )
         try:
@@ -190,7 +230,7 @@ def summarize(
         text = message.text.strip()
         if not text:
             raise RuntimeError("provider returned an empty summary")
-        summary = text
+        summary = _clip(text, MAX_SUMMARY_CHARS)
     return summary
 
 

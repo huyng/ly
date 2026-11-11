@@ -23,7 +23,7 @@ built in; any other OpenAI-compatible endpoint is declared once in the
 settings file.
 
 ```bash
-export LY_MODEL=deepseek/deepseek-flash
+export LY_MODEL=deepseek/deepseek-chat
 export DEEPSEEK_API_KEY=sk-       # or LY_API_KEY for either
 ```
 
@@ -52,15 +52,15 @@ one exists. These are read by `ly` itself:
 | `LY_MODEL` | `openai/gpt-4.1` | Model to ask for, always as `provider/model`; the provider names a preset that supplies the endpoint |
 | `LY_API_KEY` | — | API key for the provider (required, unless the preset's own variable is set) |
 | `LY_BASE_URL` | from the preset | OpenAI-compatible base URL, such as `https://api.openai.com/v1` |
-| `LY_API` | `chat` | Wire format: `chat` for `/chat/completions`, `responses` for `/responses` |
+| `LY_API_FORMAT` | from the preset | Wire format: `openai-completions` for `/chat/completions`, `openai-responses` for `/responses` |
 | `LY_PASS_REASONING_CONTENT` | from the preset: on for `deepseek` | Echo `reasoning_content` back on tool calls, which DeepSeek requires. `0`, `false`, `no` or `off` turns it off |
 | `LY_DOCKER` | `1` | Set to `0` to run on the host instead of in Docker (same as `--nosandbox`) |
 | `LY_DOCKER_IMAGE` | `python:3.12` | Image to run in when sandboxed (same as `--sandbox`) |
 | `LY_SESSIONS_DIR` | `~/.ly/sessions` | Where session JSONL files are written |
 | `LY_COMPACT` | `1` | Set to `0` to disable automatic compaction |
-| `LY_COMPACT_THRESHOLD` | `100000` | Estimated tokens in the branch that trigger compaction |
-| `LY_COMPACT_KEEP_TURNS` | `4` | Recent user turns kept verbatim |
-| `LY_COMPACT_INPUT_TOKENS` | `30000` | Cap per summarization request; longer histories are folded in batches |
+| `LY_COMPACT_THRESHOLD` | half the model's context window, or `100000` if unknown | Estimated tokens in the branch that trigger compaction |
+| `LY_COMPACT_KEEP_TURNS` | from the model: `4`, or fewer for small windows | Recent user turns kept verbatim |
+| `LY_COMPACT_INPUT_TOKENS` | the threshold | Cap per summarization request; longer histories are folded in batches |
 
 Styling also follows the usual terminal variables:
 
@@ -88,9 +88,9 @@ defaults, so a typo cannot stop `ly` from starting.
 
 ```json
 {
-  "model": "deepseek/deepseek-flash",
+  "model": "deepseek/deepseek-chat",
   "base_url": "https://api.openai.com/v1",
-  "api": "chat",
+  "api_format": "openai-completions",
   "markdown": true,
   "thinking": true,
   "sandbox": true,
@@ -104,15 +104,15 @@ environment is read in one place, `ly/settings.py`, which is also where the
 file is read, so there is a single answer to "where did this value come
 from?". `sandbox: false` is the same as `LY_DOCKER=0` or passing
 `--nosandbox` every time, `markdown` and `thinking` set the starting state of
-`/plain` and `/thinking`, and `api` must be `chat` or `responses`. Anything
-unset falls back to the preset the model names. No provider setting is a
-command-line flag, so the host and the container read the same values and
-cannot disagree about which endpoint they are talking to; for one run, export
-`LY_MODEL`. Unknown keys and values of the wrong type are ignored one at a
-time. The API key is not read from this file; keep it in `LY_API_KEY` or the
-provider's own variable. The Docker image is not read from it either: use
-`--sandbox` or `LY_DOCKER_IMAGE`. Run `/config` to see the values actually in
-effect.
+`/plain` and `/thinking`, and `api_format` must be `openai-completions` or
+`openai-responses`. Anything unset falls back to the preset the model names.
+No provider setting is a command-line flag, so the host and the container read
+the same values and cannot disagree about which endpoint they are talking to;
+for one run, export `LY_MODEL`. Unknown keys and values of the wrong type are
+ignored one at a time. The API key is not read from this file; keep it in
+`LY_API_KEY` or the provider's own variable. The Docker image is not read from
+it either: use `--sandbox` or `LY_DOCKER_IMAGE`. Run `/config` to see the
+values actually in effect.
 
 Define more providers under `providers`, then name one in the model:
 
@@ -122,14 +122,18 @@ Define more providers under `providers`, then name one in the model:
   "providers": {
     "mygateway": {
       "base_url": "https://gw.internal/v1",
-      "api": "chat",
+      "api_format": "openai-completions",
       "key_env": ["MYGW_API_KEY"],
       "pass_reasoning_content": false,
-      "models": ["house-model", "house-fast"]
+      "models": { "house-model": 32768 }
     }
   }
 }
 ```
+
+`models` is the context window of each model, in tokens, which is what sizes
+compaction; a name listed without one is still offered by Tab but compacts on
+the global defaults.
 
 An entry merges over the built-in provider of the same name, so routing
 `openai` through a proxy is one key, and the endpoint's other facts — wire
@@ -148,12 +152,12 @@ ly "fix the failing tests"         # start with an initial prompt
 ly -p "what does this repo do?"    # print mode: run once, write final response
 ly --resume 2                      # resume a previous session
 ly -s python:3.12                  # run in the named Docker image
-LY_MODEL=deepseek/deepseek-flash ly # one run, one model
+LY_MODEL=deepseek/deepseek-chat ly # one run, one model
 ```
 
 ### Switching models and providers
 
-`/model deepseek/deepseek-flash` switches mid-session, keeping the transcript.
+`/model deepseek/deepseek-chat` switches mid-session, keeping the transcript.
 The endpoint, the key, the wire format and the model all move together,
 because they are one provider's facts rather than four settings you have to
 keep in step. `/model` alone prints what is in force. Tab completes
@@ -162,8 +166,8 @@ reference this session has already used. The model list is a hand-written guide
 in `ly/presets.py`, not a gate: `/model` sends whatever you type.
 
 ```bash
-ly> /model deepseek/deepseek-flash  # endpoint, key and model at once
-model: deepseek/deepseek-flash
+ly> /model deepseek/deepseek-chat  # endpoint, key and model at once
+model: deepseek/deepseek-chat
 ly> /model deepseek/deepseek-reasoner  # same provider, another model
 ly> /model openai/gpt-4.1          # another provider, and its key variable
 ```
@@ -265,7 +269,7 @@ A session is ly's record of a conversation. The pieces mirror pi:
 - **Sessions** — append-only JSONL under `~/.ly/sessions/<date>/` (override
   with `LY_SESSIONS_DIR`). Each entry has an id and a parent, so history forms
   a tree whose active branch supplies model context (pointer lines record the
-  active leaf). Assistant messages record `api` (wire format) and `model`.
+  active leaf). Assistant messages record `api_format` and `model`.
 - **System prompt** — base instructions plus `AGENTS.md` files: the user's
   `~/.agents/AGENTS.md` and the one in the working directory. Ancestors are
   not searched, so run ly from the project root to pick up its instructions.
@@ -293,12 +297,19 @@ A session is ly's record of a conversation. The pieces mirror pi:
 
 ## Long sessions
 
-Compaction kicks in automatically, or on demand with `/compact`. Its defaults
-(`LY_COMPACT`, `LY_COMPACT_THRESHOLD`, `LY_COMPACT_KEEP_TURNS` and
-`LY_COMPACT_INPUT_TOKENS`, listed above) suit a ~200k-token context window.
+Compaction kicks in automatically, or on demand with `/compact`. Its sizes come
+from the context window of the model in use, because a 64k model must compact
+long before a 1M one. The threshold is half the window, so a 1M model keeps
+compacting until roughly 500k tokens and the other half stays free for the
+reply. The summary cap is the threshold itself, so the history to summarize
+always fits in one request. `LY_COMPACT`, the threshold, the turns kept verbatim
+and the summary cap are listed above.
 
-All four can go in the settings file under a `compaction` object instead,
-where a variable still wins:
+A window that no preset knows leaves the plain defaults in charge, which compact
+at 100k. `/config` prints the window and the numbers it produced.
+
+All four can go in the settings file under a `compaction` object instead, where
+a variable still wins and both beat the window-derived values:
 
 ```json
 {
@@ -309,10 +320,31 @@ where a variable still wins:
 }
 ```
 
-Lower the threshold when running a smaller-context model. Compaction is
-conservative: if the summary would not be smaller than the turns it replaces
-(short branches, or one huge tool result), it is skipped and the verbatim
-history is kept. Failures are non-fatal too — the summary request fails,
+Declare a window for a model ly does not ship, and compaction sizes itself the
+same way:
+
+```json
+{
+  "providers": {
+    "mygateway": {
+      "base_url": "https://gw.internal/v1",
+      "models": {
+        "house-model": 32768,
+        "house-fast": { "context_window": 8192, "keep_turns": 2 }
+      }
+    }
+  }
+}
+```
+
+The model is asked for notes of under 300 words, and the result is bounded to
+the size of a user turn (2,000 chars) when it is produced, so the message that
+re-enters history is never trimmed again — not by the next batch, and not by a
+later compaction.
+
+Compaction is conservative: if the summary would not be smaller than the turns
+it replaces (short branches, or one huge tool result), it is skipped and the
+verbatim history is kept. Failures are non-fatal too — the summary request fails,
 history is left untouched, and the run continues.
 
 ## SDK usage

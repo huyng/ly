@@ -17,7 +17,7 @@ class Provider:
         model: str,
         base_url: str = "",
         api_key: str = "",
-        api: str = "chat",
+        api_format: str = "openai-completions",
         pass_reasoning_content: bool = False,
     ):
         if not api_key:
@@ -29,9 +29,10 @@ class Provider:
 
         self.model = model
         self.base_url = base_url
-        # "chat" for `/chat/completions`, "responses" for `/responses`; the
-        # latter is the only route to tools on OpenAI's newest models.
-        self.api = (api or "chat").strip().lower()
+        # "openai-completions" for `/chat/completions`, "openai-responses" for
+        # `/responses`; the latter is the only route to tools on OpenAI's newest
+        # models.
+        self.api_format = (api_format or "openai-completions").strip().lower()
         self.api_key = api_key
         # Which endpoint needs `reasoning_content` echoed back is a fact about
         # the provider, so it arrives here resolved rather than guessed from the

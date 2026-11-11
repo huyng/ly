@@ -25,7 +25,7 @@ def create_agent_session(
     model: str | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
-    api: str | None = None,
+    api_format: str | None = None,
     cwd: str | None = None,
     tools: list[Tool] | None = None,
     persistent: bool = True,
@@ -57,7 +57,7 @@ def create_agent_session(
         model=model or DEFAULT_MODEL,
         base_url=base_url,
         api_key=api_key,
-        api=api,
+        api_format=api_format,
     )
     provider = settings.make_provider()
     # The SDK takes its configuration as arguments, so the default lives here

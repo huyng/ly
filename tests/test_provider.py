@@ -481,7 +481,7 @@ def test_response_records_api_and_model():
     backend, _ = make_backend([chunk(content="ok")])
     _, message = collect(backend, [])
 
-    assert message.api == "openai-completions"
+    assert message.api_format == "openai-completions"
     assert message.model == backend.provider.model
 
 

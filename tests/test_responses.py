@@ -100,7 +100,7 @@ def test_text_deltas_accumulate_and_usage_is_mapped():
 
     assert "".join(e.delta for e in events if isinstance(e, TextDeltaEvent)) == "Hello"
     assert message.text == "Hello"
-    assert message.api == "openai-responses"
+    assert message.api_format == "openai-responses"
     assert message.stop_reason == "stop"
     assert message.usage.input == 11
     assert message.usage.output == 4
@@ -499,25 +499,27 @@ def test_reasoning_summary_uses_default_effort(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("api", "expected"),
+    ("api_format", "expected"),
     [
-        (None, "chat"),
-        ("chat", "chat"),
-        ("responses", "responses"),
-        (" RESPONSES ", "responses"),
+        (None, "openai-completions"),
+        ("openai-completions", "openai-completions"),
+        ("openai-responses", "openai-responses"),
+        (" OPENAI-RESPONSES ", "openai-responses"),
     ],
 )
-def test_make_backend_picks_the_backend(api, expected):
+def test_make_backend_picks_the_backend(api_format, expected):
     provider = Provider(
         model="m",
         base_url="https://explicit.example/v1",
         api_key="test-key",
-        api=api,
+        api_format=api_format,
     )
 
     backend = make_backend(provider)
 
-    assert isinstance(backend, ResponsesBackend) is (expected == "responses")
+    assert isinstance(backend, ResponsesBackend) is (
+        expected == "openai-responses"
+    )
 
 
 def test_make_backend_defaults_to_chat():

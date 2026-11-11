@@ -10,7 +10,23 @@ naming where it goes. A preset may name the variables that hold its key, so
 switching providers does not mean re-exporting one generic `LY_API_KEY`.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class Model:
+    """What ly knows about one model name.
+
+    Args:
+        context_window: Tokens the model accepts, which sizes compaction. None
+            when the name was listed without one, leaving the global
+            compaction settings in charge.
+        keep_turns: Recent turns to keep verbatim when this model compacts.
+            None defers to the settings file and environment.
+    """
+
+    context_window: int | None = None
+    keep_turns: int | None = None
 
 
 @dataclass(frozen=True)
@@ -19,24 +35,25 @@ class Preset:
 
     Args:
         base_url: Endpoint root, without the trailing `/chat/completions`.
-        api: Wire format, `chat` or `responses`.
+        api_format: Wire format, `openai-completions` or `openai-responses`.
         key_env: Variables that may hold this provider's key, in order, after
             `LY_API_KEY`.
         pass_reasoning_content: Whether tool calls carry `reasoning_content`
             back to the endpoint, which DeepSeek needs and others reject.
-        models: Model names the provider offers, offered by Tab after the
+        models: What the provider's models are called, offered by Tab after the
             slash. A guide, not a gate: any name is sent as typed.
     """
 
     base_url: str
-    api: str = "chat"
+    api_format: str = "openai-completions"
     key_env: tuple[str, ...] = ()
     #: Whether a tool call must echo `reasoning_content` back. DeepSeek requires
     #: it; anything else rejecting the field is why this is not always on.
     pass_reasoning_content: bool = False
     #: Written out by hand because no provider publishes a list ly can read
-    #: without a key. `GET /models` with a key is where these come from.
-    models: tuple[str, ...] = ()
+    #: without a key. `GET /models` with a key is where these come from; the
+    #: window is from the provider's documentation.
+    models: dict[str, Model] = field(default_factory=dict)
 
 
 #: What ly asks for when nothing says otherwise, so a key and nothing else is
@@ -49,13 +66,20 @@ BUILT_IN: dict[str, Preset] = {
     "openai": Preset(
         base_url="https://api.openai.com/v1",
         key_env=("OPENAI_API_KEY",),
-        models=("gpt-4.1",),
+        models={
+            "gpt-6.1-sol": Model(context_window=1_047_576),
+            "gpt-6.1-terra": Model(context_window=1_047_576),
+            "gpt-6-astra": Model(context_window=1_047_576)
+        },
     ),
     "deepseek": Preset(
         base_url="https://api.deepseek.com",
         key_env=("DEEPSEEK_API_KEY",),
         pass_reasoning_content=True,
-        models=("deepseek-chat", "deepseek-reasoner"),
+        models={
+            "deepseek-flash": Model(context_window=1_047_576, keep_turns=4),
+            "deepseek-v4-pro": Model(context_window=1_047_576, keep_turns=4),
+        },
     ),
 }
 
@@ -68,7 +92,7 @@ def split(reference: str) -> tuple[str, str]:
     provider, and one of the halves is then empty.
 
     Args:
-        reference: A model reference, such as `deepseek/deepseek-flash`.
+        reference: A model reference, such as `deepseek/deepseek-chat`.
 
     Returns:
         The provider name and the model name to send. The provider name comes

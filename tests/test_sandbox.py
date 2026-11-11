@@ -23,7 +23,7 @@ def _clean_model_environment(monkeypatch):
     The model names its provider now, so an exported `LY_MODEL` would decide
     whether `main` reaches docker at all.
     """
-    for name in ("LY_MODEL", "LY_BASE_URL", "LY_API", "LY_API_KEY"):
+    for name in ("LY_MODEL", "LY_BASE_URL", "LY_API_FORMAT", "LY_API_KEY"):
         monkeypatch.delenv(name, raising=False)
 
 

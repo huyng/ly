@@ -35,7 +35,7 @@ from ly.tools.task import SubAgentTool
 class FakeBackend(ModelBackend):
     """Scripts a sequence of turns: each turn is an AssistantMessage."""
 
-    api = "fake"
+    api_format = "fake"
 
     def __init__(self, turns: list[AssistantMessage]):
         super().__init__(Provider(model="fake-model", base_url="fake", api_key="fake"))
@@ -355,7 +355,7 @@ def test_interrupt_inside_a_tool_answers_every_call(tmp_path):
 
 def test_abort_during_retry_stops_without_another_request(tmp_path):
     class FailingBackend(FakeBackend):
-        api = "fake"
+        api_format = "fake"
 
         def __init__(self):
             super().__init__([])
@@ -381,7 +381,7 @@ def test_abort_during_retry_stops_without_another_request(tmp_path):
     final = session.prompt("hi")
 
     assert final.stop_reason == "aborted"
-    assert final.api == "fake"
+    assert final.api_format == "fake"
     assert backend.calls == 1
 
 
@@ -389,7 +389,7 @@ def test_permanent_error_is_not_retried(tmp_path):
     """A 401 must fail once, immediately — not three times over 3 seconds."""
 
     class UnauthorizedBackend(FakeBackend):
-        api = "fake"
+        api_format = "fake"
 
         def __init__(self):
             super().__init__([])
@@ -426,7 +426,7 @@ def test_transient_error_is_retried(tmp_path, monkeypatch):
     monkeypatch.setattr("ly.agent.RETRY_DELAYS", (0, 0, 0))
 
     class FlakyBackend(FakeBackend):
-        api = "fake"
+        api_format = "fake"
 
         def __init__(self):
             super().__init__([])
@@ -448,7 +448,7 @@ def test_transient_error_is_retried(tmp_path, monkeypatch):
 
     assert backend.calls == 3
     assert final.stop_reason == "error"
-    assert final.api == "fake"
+    assert final.api_format == "fake"
     assert "503" in (final.error_message or "")
 
 
@@ -458,7 +458,7 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
     monkeypatch.setattr("ly.agent.RETRY_DELAYS", (0, 0, 0))
 
     class FlakyBackend(FakeBackend):
-        api = "fake"
+        api_format = "fake"
 
         def __init__(self):
             super().__init__([])
@@ -536,7 +536,7 @@ def test_create_agent_session_wants_a_provider_with_its_model():
 
 def failing_backend(reason, *, retryable=False):
     class FailingBackend(FakeBackend):
-        api = "fake"
+        api_format = "fake"
 
         def __init__(self):
             super().__init__([])
@@ -664,8 +664,8 @@ def test_unexpected_provider_failure_is_not_retried(during_stream):
     assert session.busy is False
 
 
-@pytest.mark.parametrize("api", ["chat", "responses"])
-def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
+@pytest.mark.parametrize("api_format", ["openai-completions", "openai-responses"])
+def test_streamed_provider_failure_retries_and_counts_usage(api_format, monkeypatch):
     monkeypatch.setattr("ly.agent.RETRY_DELAYS", (0, 0, 0))
     requests = []
 
@@ -674,7 +674,7 @@ def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
             requests.append(url)
 
         def read_chunks(self):
-            if api == "chat":
+            if api_format == "openai-completions":
                 yield {
                     "choices": [
                         {"delta": {}, "finish_reason": "insufficient_system_resource"}
@@ -699,7 +699,10 @@ def test_streamed_provider_failure_retries_and_counts_usage(api, monkeypatch):
                 }
 
     provider = Provider(
-        model="m", base_url="https://explicit.example/v1", api_key="test", api=api
+        model="m",
+        base_url="https://explicit.example/v1",
+        api_key="test",
+        api_format=api_format,
     )
     backend = make_backend(provider, FakeReader)
     session = AgentSession(

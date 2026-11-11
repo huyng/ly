@@ -8,11 +8,14 @@ import pytest
 
 from ly.agent import AgentSession
 from ly.compaction import (
+    MAX_SUMMARY_CHARS,
     SUMMARY_PREFIX,
     SUMMARY_SYSTEM_PROMPT,
     CompactionConfig,
     estimate_tokens,
+    render_transcript,
     split_index,
+    summary_message,
     summarize,
 )
 from ly.events import (
@@ -38,7 +41,7 @@ from ly.session import SessionManager
 class ScriptedBackend(ModelBackend):
     """Scripts a sequence of turns and records every request it receives."""
 
-    api = "fake"
+    api_format = "fake"
 
     def __init__(self, turns: list[AssistantMessage]):
         super().__init__(Provider(model="fake-model", base_url="fake", api_key="fake"))
@@ -200,6 +203,57 @@ def test_estimate_tokens_counts_tool_output():
         ToolResultMessage(tool_call_id="c", tool_name="read", output="z" * 4000)
     ]
     assert estimate_tokens(large) > estimate_tokens(small) + 900
+
+
+# -- render_transcript ---------------------------------------------------------
+
+
+def test_a_summary_is_clipped_once_when_it_is_produced():
+    """Bounding it there is what lets the transcript, the next batch and a later
+    compaction all carry it without a second trim."""
+    backend = ScriptedBackend([reply("SUM " * 2_000)])
+
+    summary = summarize(backend, [UserMessage(content="hi")], CompactionConfig())
+
+    assert len(summary) == MAX_SUMMARY_CHARS
+
+
+def test_a_produced_summary_survives_the_next_compaction_whole():
+    """The summary replaces the turns it describes, so the next compaction must
+    hand all of it back to the model."""
+    backend = ScriptedBackend([reply("S" * MAX_SUMMARY_CHARS)])
+    summary = summarize(backend, [UserMessage(content="hi")], CompactionConfig())
+
+    message = summary_message(summary)
+
+    assert summary in render_transcript([message])
+
+
+def test_a_plain_user_turn_is_still_clipped():
+    rendered = render_transcript([UserMessage(content="u" * 5_000)])
+
+    assert len(rendered) < 2_100
+
+
+def test_a_tool_result_keeps_a_stack_trace():
+    """500 chars cut most tracebacks before the exception that explains them."""
+    output = "Traceback (most recent call last):\n" + "File \"a.py\"\n" * 80
+    output += "KeyError: 'context_window'"
+    assert len(output) < 2_000
+
+    rendered = render_transcript(
+        [ToolResultMessage(tool_call_id="c", tool_name="bash", output=output)]
+    )
+
+    assert "KeyError: 'context_window'" in rendered
+
+
+def test_a_huge_tool_result_is_still_clipped():
+    rendered = render_transcript(
+        [ToolResultMessage(tool_call_id="c", tool_name="read", output="z" * 50_000)]
+    )
+
+    assert len(rendered) < 2_100
 
 
 # -- session re-rooting --------------------------------------------------------

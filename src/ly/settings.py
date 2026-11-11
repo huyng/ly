@@ -29,8 +29,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from .compaction import CompactionConfig
-from .presets import BUILT_IN, DEFAULT_MODEL, Preset, split
+from .compaction import CompactionConfig, for_window
+from .presets import BUILT_IN, DEFAULT_MODEL, Model, Preset, split
 from .providers import Provider
 from .providers.errors import MissingCredentialsError, UnknownProviderError
 
@@ -41,7 +41,7 @@ DEFAULT_SESSIONS_DIR = "~/.ly/sessions"
 
 # Only these values reach the provider; argparse used to enforce them, but an
 # environment variable or a settings file bypasses that check.
-API_KINDS = ("chat", "responses")
+API_FORMATS = ("openai-completions", "openai-responses")
 
 # (setting name, environment variable) for each key that is a plain integer.
 COMPACTION_INTS = (
@@ -84,6 +84,36 @@ def _compaction_from_file(data: dict) -> dict:
     return values
 
 
+def _models_from_file(entry: dict) -> dict[str, Model]:
+    """Read a provider's `models` table: names, windows, or both.
+
+    A list of names says what Tab may offer without saying how big the models
+    are. A number is a context window. An object carries a window and, when it
+    differs from the global default, the turns to keep verbatim.
+    """
+    block = entry.get("models")
+    if isinstance(block, list):
+        return {name: Model() for name in block if isinstance(name, str)}
+    if not isinstance(block, dict):
+        return {}
+
+    models: dict[str, Model] = {}
+    for name, value in block.items():
+        window = (
+            value if isinstance(value, int) and not isinstance(value, bool) else None
+        )
+        keep = None
+        if isinstance(value, dict):
+            window = value.get("context_window")
+            keep = value.get("keep_turns")
+        # A window has to be a positive count of tokens to say anything.
+        models[name] = Model(
+            context_window=window if isinstance(window, int) and window > 0 else None,
+            keep_turns=keep if isinstance(keep, int) and keep > 0 else None,
+        )
+    return models
+
+
 def _presets_from_file(data: dict) -> dict[str, Preset]:
     """Read the `providers` block: named endpoints added or overridden by hand.
 
@@ -103,8 +133,8 @@ def _presets_from_file(data: dict) -> dict[str, Preset]:
         base_url = entry.get("base_url")
         if isinstance(base_url, str) and base_url:
             given["base_url"] = base_url
-        if entry.get("api") in API_KINDS:
-            given["api"] = entry["api"]
+        if entry.get("api_format") in API_FORMATS:
+            given["api_format"] = entry["api_format"]
         # A declared provider that speaks DeepSeek's dialect needs this false
         # flag turned on; the environment can still override it per run.
         if isinstance(entry.get("pass_reasoning_content"), bool):
@@ -112,9 +142,8 @@ def _presets_from_file(data: dict) -> dict[str, Preset]:
         key_env = entry.get("key_env")
         if isinstance(key_env, list):
             given["key_env"] = tuple(v for v in key_env if isinstance(v, str))
-        models = entry.get("models")
-        if isinstance(models, list):
-            given["models"] = tuple(v for v in models if isinstance(v, str))
+        if "models" in entry:
+            given["models"] = _models_from_file(entry)
         # A new provider without an endpoint says nothing a default could fill
         # in; a known one keeps the endpoint it already has.
         if "base_url" not in given and name not in BUILT_IN:
@@ -141,8 +170,8 @@ def _from_file(path: str | Path | None) -> dict:
         value = data.get(name)
         if isinstance(value, str) and value:
             values[name] = value
-    if data.get("api") in API_KINDS:
-        values["api"] = data["api"]
+    if data.get("api_format") in API_FORMATS:
+        values["api_format"] = data["api_format"]
     for name in ("markdown", "thinking", "sandbox"):
         value = data.get(name)
         # `isinstance(1, bool)` is False, so a JSON number is not read as a flag.
@@ -151,10 +180,40 @@ def _from_file(path: str | Path | None) -> dict:
     return values
 
 
+def _model_of(presets: Mapping[str, Preset], reference: str) -> Model | None:
+    """What the reference's preset says about that model, if anything."""
+    name, model = split(reference)
+    preset = presets.get(name)
+    return preset.models.get(model) if preset else None
+
+
+def _compaction(
+    explicit: dict, presets: Mapping[str, Preset], reference: str
+) -> CompactionConfig:
+    """Size compaction to the model in use, then let explicit keys win.
+
+    Args:
+        explicit: Keys from the settings file and environment.
+        presets: The presets in force, built-in plus declared.
+        reference: The `provider/model` reference in use.
+
+    Returns:
+        A context window's worth of defaults, unless a model or the user said
+        otherwise. A model that no preset sizes keeps the plain defaults.
+    """
+    model = _model_of(presets, reference)
+    sized = CompactionConfig()
+    if model is not None and model.context_window:
+        sized = for_window(model.context_window)
+    if model is not None and model.keep_turns is not None:
+        sized = replace(sized, keep_turns=model.keep_turns)
+    return replace(sized, **explicit)
+
+
 def _apply_preset(values: dict, preset: Preset, env: Mapping[str, str]) -> None:
     """Fill the values the user did not set from the preset the model names."""
     values.setdefault("base_url", preset.base_url)
-    values.setdefault("api", preset.api)
+    values.setdefault("api_format", preset.api_format)
     values.setdefault("pass_reasoning_content", preset.pass_reasoning_content)
     if values.get("api_key"):
         return
@@ -177,8 +236,8 @@ def _from_env(env) -> dict:
         text = env.get(variable)
         if text:
             values[name] = text
-    if env.get("LY_API") in API_KINDS:
-        values["api"] = env["LY_API"]
+    if env.get("LY_API_FORMAT") in API_FORMATS:
+        values["api_format"] = env["LY_API_FORMAT"]
 
     # `LY_SB_SESSIONS_DIR` is where the sandbox mounted the host's sessions, so
     # it wins over the preference: the mount, not the setting, decides where the
@@ -222,7 +281,7 @@ class Settings:
     # Always a `provider/model` reference, so no request can be aimed nowhere.
     model: str = DEFAULT_MODEL
     base_url: str | None = None
-    api: str | None = None
+    api_format: str | None = None
     api_key: str | None = None
     # Resolved by `load` from the preset; `LY_PASS_REASONING_CONTENT` overrides.
     # A provider named by hand gets False, which is what every non-DeepSeek
@@ -249,7 +308,7 @@ class Settings:
         model: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        api: str | None = None,
+        api_format: str | None = None,
     ) -> "Settings":
         """Merge the settings file and the environment, environment winning.
 
@@ -265,7 +324,7 @@ class Settings:
                 provider half still has to name a preset: an endpoint alone
                 does not say which wire format or key variable to use.
             api_key: Key to use instead of the one the environment supplies.
-            api: Wire format, `chat` or `responses`; ignored otherwise.
+            api_format: Wire format; ignored unless it is one of the known ones.
 
         Returns:
             The merged settings, with defaults for keys neither source supplies
@@ -286,7 +345,7 @@ class Settings:
             "model": model,
             "base_url": base_url,
             "api_key": api_key,
-            "api": api if api in API_KINDS else None,
+            "api_format": api_format if api_format in API_FORMATS else None,
         }
         values |= {name: value for name, value in given.items() if value}
         values.setdefault("model", DEFAULT_MODEL)
@@ -297,7 +356,7 @@ class Settings:
         if preset is not None:
             _apply_preset(values, preset, environment)
         return cls(
-            compaction=replace(CompactionConfig(), **compaction),
+            compaction=_compaction(compaction, presets, values["model"]),
             presets=presets,
             **values,
         )
@@ -312,6 +371,12 @@ class Settings:
     def model_name(self) -> str:
         """The half of the model reference that is sent to the endpoint."""
         return split(self.model)[1]
+
+    @property
+    def context_window(self) -> int | None:
+        """Tokens the model in use accepts, None when its preset does not say."""
+        model = _model_of(self.presets, self.model)
+        return model.context_window if model else None
 
     @property
     def key_variables(self) -> tuple[str, ...]:
@@ -358,6 +423,6 @@ class Settings:
             model=self.model_name,
             base_url=self.base_url or "",
             api_key=self.api_key or "",
-            api=self.api or "chat",
+            api_format=self.api_format or "openai-completions",
             pass_reasoning_content=self.pass_reasoning_content,
         )

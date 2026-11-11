@@ -102,50 +102,14 @@ def test_assistant_metadata_round_trip(tmp_path):
     message = AssistantMessage(
         content=[],
         model="model",
-        api="openai-responses",
+        api_format="openai-responses",
     )
     manager.append(message)
     assert manager.file is not None
-    assert "provider" not in serialize_message(message)
 
     restored = SessionManager(directory=tmp_path)
     restored.load(manager.file)
     assert restored.active_branch() == [message]
-
-
-@pytest.mark.parametrize(
-    ("provider", "api"),
-    [
-        ("openai", "openai-completions"),
-        ("openai-responses", "openai-responses"),
-        ("fake", ""),
-    ],
-)
-def test_legacy_assistant_metadata_loads(tmp_path, provider, api):
-    message = AssistantMessage(content=[], model="model")
-    saved = serialize_message(message)
-    saved["provider"] = provider
-    saved.pop("api")
-    path = touch(
-        tmp_path / "legacy.jsonl",
-        [
-            json.dumps(
-                {
-                    "id": "message",
-                    "parent": None,
-                    "message": saved,
-                }
-            ),
-            json.dumps({"current": "message"}),
-        ],
-    )
-    manager = SessionManager(directory=tmp_path)
-    manager.load(path)
-    restored = manager.active_branch()[0]
-
-    assert isinstance(restored, AssistantMessage)
-    assert restored.api == api
-    assert "provider" not in serialize_message(restored)
 
 
 def test_active_branch_preserves_timestamps(monkeypatch):

@@ -90,15 +90,8 @@ HELP = """\
 /resume <n>        Resume the n-th session from /sessions
 /compact           Summarize old turns now (automatic near the limit)
 /<name> [args]     Run a command defined in .agents/commands (listed below)
-/quit              Exit (also Ctrl-D)
+/quit, /exit       Exit (also Ctrl-D)
 """
-
-
-def _reasoning_mode(value: bool | None) -> str:
-    """Name the tri-state reasoning setting; None means the provider decides."""
-    if value is None:
-        return "auto (from base URL)"
-    return "on" if value else "off"
 
 
 def use_container(args: argparse.Namespace) -> bool:
@@ -146,9 +139,9 @@ class Repl:
         self.show_thinking = preferences.thinking
         self.commands = discover(self.session.cwd)
         self._pastes: dict[str, str] = {}
-        # Model names cannot be listed: no provider publishes them, and the
-        # preset table deliberately holds none. Tab therefore offers the
-        # providers it knows and the references this session has used.
+        # References this session has used, newest last. The presets list the
+        # models they know, but any reference is legal, so what was typed
+        # before stays worth offering.
         self._models = [preferences.model]
 
         self.session.subscribe(self._on_event)
@@ -651,6 +644,9 @@ class Repl:
         # The wire format is baked into the backend class, so the backend is
         # replaced. The reader carries over, so a test's stand-in survives.
         self.session.backend = make_backend(provider, self.session.backend.reader)
+        # Compaction is sized by the new model's context window, so the old
+        # numbers would compact at the wrong point: too late for a smaller one.
+        self.session.compaction = fresh.compaction
         self.settings = fresh
         if text not in self._models:
             self._models.append(text)
@@ -665,6 +661,7 @@ class Repl:
         """
         provider = self.session.backend.provider
         compaction = self.session.compaction
+        window = self.settings.context_window
         if compaction.enabled:
             trigger = f"on, {compaction.threshold_tokens:,} tokens"
         else:
@@ -672,10 +669,11 @@ class Repl:
         rows = [
             ("provider", self.settings.provider or "custom"),
             ("model", provider.model),
+            ("context window", f"{window:,} tokens" if window else "unknown"),
             ("base_url", provider.base_url or "unset"),
-            ("api", provider.api),
+            ("api_format", provider.api_format),
             ("api key", "set (redacted)" if provider.api_key else "none set"),
-            ("pass reasoning", _reasoning_mode(provider.pass_reasoning_content)),
+            ("pass reasoning", "on" if provider.pass_reasoning_content else "off"),
             ("markdown", "on" if self.markdown else "off"),
             ("thinking", "shown" if self.show_thinking else "hidden"),
             ("sandbox", "container" if sandbox.in_container() else "host"),

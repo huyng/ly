@@ -42,7 +42,7 @@ class MissingCredentialsError(ProviderError):
 
 class MissingBaseURLError(ProviderError):
     def __init__(self):
-        super().__init__("Missing Base URL for api. Set LY_BASE_URL", retryable=False)
+        super().__init__("Missing base URL. Set LY_BASE_URL.", retryable=False)
 
 
 class UnknownProviderError(ProviderError):

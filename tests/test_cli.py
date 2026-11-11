@@ -29,7 +29,44 @@ from ly.providers.backend import ModelBackend, ResponsesBackend
 from ly.session import SessionManager
 from ly.cli import COMMANDS
 from ly.commands import Command
+from ly.presets import Model, Preset
+from ly.settings import Settings
 from ly.theme import Theme
+
+#: A fixed catalogue for completion and sizing tests. The models ly ships are
+#: the user's own data and change, so tests state the names and windows they
+#: mean rather than reading the built-in table.
+TEST_PRESETS = {
+    "openai": Preset(
+        base_url="https://api.openai.com/v1",
+        key_env=("OPENAI_API_KEY",),
+        models={"gpt-4.1": Model(context_window=1_047_576)},
+    ),
+    "deepseek": Preset(
+        base_url="https://api.deepseek.com",
+        key_env=("DEEPSEEK_API_KEY",),
+        pass_reasoning_content=True,
+        models={
+            "deepseek-chat": Model(context_window=65_536, keep_turns=3),
+            "deepseek-reasoner": Model(context_window=65_536, keep_turns=3),
+        },
+    ),
+}
+
+def _as_file_entry(preset: Preset) -> dict:
+    """One preset written the way a settings file would hold it."""
+    return {
+        "base_url": preset.base_url,
+        "key_env": list(preset.key_env),
+        "models": {
+            name: {"context_window": spec.context_window, "keep_turns": spec.keep_turns}
+            for name, spec in preset.models.items()
+        },
+    }
+
+
+#: The same catalogue as a settings file, for tests that go through `load()`.
+TEST_SETTINGS = {name: _as_file_entry(preset) for name, preset in TEST_PRESETS.items()}
 
 
 class ScriptedBackend(ModelBackend):
@@ -42,7 +79,16 @@ class ScriptedBackend(ModelBackend):
         raise AssertionError("the status line must not call the provider")
 
 
-def make_repl(threshold_tokens: int = 100_000, enabled: bool = True) -> Repl:
+def catalogue_settings(model: str = "openai/gpt-4.1") -> Settings:
+    """Settings over the test catalogue, so completion is not the user's data."""
+    return Settings(presets=TEST_PRESETS, model=model)
+
+
+def make_repl(
+    threshold_tokens: int = 100_000,
+    enabled: bool = True,
+    settings: Settings | None = None,
+) -> Repl:
     session = AgentSession(
         backend=ScriptedBackend(),
         tools=[],
@@ -60,7 +106,7 @@ def make_repl(threshold_tokens: int = 100_000, enabled: bool = True) -> Repl:
         )
     )
     session.usage = Usage(input=1_234, output=567, total_tokens=1_801)
-    return Repl(session, Theme(enabled=False))
+    return Repl(session, Theme(enabled=False), settings or catalogue_settings())
 
 
 def test_tab_completes_the_provider_half_of_a_model():
@@ -138,20 +184,20 @@ def test_tab_lists_markdown_commands_too():
     assert repl._completions("/rev") == ["/review"]
 
 
-def test_tab_completes_a_command_name_from_a_bare_slash():
+def test_tab_completes_a_command_name_from_a_bare_slash(monkeypatch):
     """Libedit breaks the word at `/`, so the whole command name is the
     replacement only after the slash is accounted for."""
     repl = make_repl()
 
-    assert complete_at(repl, "/mo", "mo") == ["/model"]
-    assert complete_at(repl, "/mo", "/mo") == ["/model"]
+    assert complete_at(repl, "/mo", "mo", monkeypatch) == ["/model"]
+    assert complete_at(repl, "/mo", "/mo", monkeypatch) == ["/model"]
 
 
-def complete_at(repl, line, text):
+def complete_at(repl, line, text, monkeypatch):
     """Answers for one Tab, plus the line each answer would produce."""
     import readline
 
-    readline.get_line_buffer = lambda: line
+    monkeypatch.setattr(readline, "get_line_buffer", lambda: line)
     start = len(line) - len(text)
     answers = []
     for state in range(5):
@@ -162,31 +208,33 @@ def complete_at(repl, line, text):
     return answers
 
 
-def test_tab_after_the_slash_offers_the_model_alone():
+def test_tab_after_the_slash_offers_the_model_alone(monkeypatch):
     """Regression: libedit breaks the word at `/`, so a full reference came
     back as `/model deepseek/deepseek/deepseek-...`."""
     repl = make_repl()
 
-    assert complete_at(repl, "/model deepseek/", "") == [
+    assert complete_at(repl, "/model deepseek/", "", monkeypatch) == [
         "/model deepseek/deepseek-chat",
         "/model deepseek/deepseek-reasoner",
     ]
 
 
-def test_tab_keeps_the_provider_when_readline_breaks_on_slashes():
+def test_tab_keeps_the_provider_when_readline_breaks_on_slashes(monkeypatch):
     repl = make_repl()
 
-    assert complete_at(repl, "/model deepseek/deepseek-r", "deepseek-r") == [
-        "/model deepseek/deepseek-reasoner"
-    ]
+    assert complete_at(
+        repl, "/model deepseek/deepseek-r", "deepseek-r", monkeypatch
+    ) == ["/model deepseek/deepseek-reasoner"]
 
 
-def test_tab_offers_the_whole_reference_when_the_word_is_the_reference():
+def test_tab_offers_the_whole_reference_when_the_word_is_the_reference(
+    monkeypatch,
+):
     """GNU readline treats the reference as one word, so the candidate has to
     carry the provider with it."""
     repl = make_repl()
 
-    assert complete_at(repl, "/model deepseek/d", "deepseek/d") == [
+    assert complete_at(repl, "/model deepseek/d", "deepseek/d", monkeypatch) == [
         "/model deepseek/deepseek-chat",
         "/model deepseek/deepseek-reasoner",
     ]
@@ -445,7 +493,7 @@ def test_no_provider_option_is_a_flag(monkeypatch):
 
     assert Settings.load().api_key == "env-key"
 
-    for flag in ("--model", "--base-url", "--api", "--api-key", "--provider"):
+    for flag in ("--model", "--base-url", "--api-format", "--api-key", "--provider"):
         with pytest.raises(SystemExit):
             build_parser().parse_args([flag, "x"])
 
@@ -479,9 +527,11 @@ def test_a_sessions_directory_that_cannot_be_written_is_explained(monkeypatch):
 
 
 def provider_repl(monkeypatch, tmp_path) -> Repl:
-    """A REPL whose switches resolve from a clean environment, not this machine's."""
-    monkeypatch.setattr("ly.settings.DEFAULT_PATH", str(tmp_path / "absent.json"))
-    for name in ("LY_MODEL", "LY_BASE_URL", "LY_API", "LY_API_KEY"):
+    """A REPL whose switches resolve from the test catalogue, not this machine's."""
+    path = tmp_path / "catalogue.json"
+    path.write_text(json.dumps({"providers": TEST_SETTINGS}))
+    monkeypatch.setattr("ly.settings.DEFAULT_PATH", str(path))
+    for name in ("LY_MODEL", "LY_BASE_URL", "LY_API_FORMAT", "LY_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek")
@@ -509,6 +559,18 @@ def test_a_switch_changes_the_endpoint_model_and_key(monkeypatch, capsys, tmp_pa
     assert provider.api_key == "sk-deepseek"
     assert repl.settings.provider == "deepseek"
     assert "deepseek/deepseek-chat" in capsys.readouterr().out
+
+
+def test_a_switch_resizes_compaction_to_the_new_model(monkeypatch, capsys, tmp_path):
+    """Regression: the threshold stayed at the old model's, so a 64k model
+    compacted only after the window had already overflowed."""
+    repl = provider_repl(monkeypatch, tmp_path)
+    before = repl.session.compaction.threshold_tokens
+
+    repl._command("/model deepseek/deepseek-chat")
+
+    assert repl.session.compaction.threshold_tokens == 32_768
+    assert before == 100_000
 
 
 def test_a_model_without_a_provider_changes_nothing(monkeypatch, capsys, tmp_path):
@@ -539,7 +601,10 @@ def test_a_switch_rebuilds_the_backend_for_the_new_wire_format(
         json.dumps(
             {
                 "providers": {
-                    "gw": {"base_url": "https://gw.test/v1", "api": "responses"}
+                    "gw": {
+                        "base_url": "https://gw.test/v1",
+                        "api_format": "openai-responses",
+                    }
                 }
             }
         ),
@@ -552,7 +617,7 @@ def test_a_switch_rebuilds_the_backend_for_the_new_wire_format(
     repl._command("/model gw/house-model")
 
     assert isinstance(repl.session.backend, ResponsesBackend)
-    assert repl.session.backend.provider.api == "responses"
+    assert repl.session.backend.provider.api_format == "openai-responses"
 
 
 def test_a_provider_without_a_key_says_so(monkeypatch, capsys, tmp_path):

@@ -49,7 +49,6 @@ from .providers.errors import (
 from .render import (
     GutterWriter,
     MarkdownRenderer,
-    format_duration,
     render_tool_result,
     summarize_tool_call,
 )
@@ -598,7 +597,7 @@ class Repl:
         # so a rate built from it would shrink with every prompt.
         usage = self.session.usage
         if usage.total_tokens:
-            parts = [self.session.backend.provider.model, format_duration(elapsed)]
+            parts = [self.session.backend.provider.model]
             if elapsed and output_tokens:
                 parts.append(f"{output_tokens / elapsed:.0f} tok/s")
             # The cumulative `in` below cannot say how close the next request is
@@ -611,6 +610,12 @@ class Repl:
                 f"{usage.input:,} in",
                 f"{usage.output:,} out",
             ]
+            if self.session.cwd:
+                # A resumed session can be in another directory than the shell
+                # that started it. Inside a container the mount point says
+                # nothing about where the user is, so name the host directory.
+                host = sandbox.host_dir() if sandbox.in_container() else None
+                parts.append(os.path.expanduser(host or self.session.cwd))
             print(
                 self.theme.dim("⟨ " + " · ".join(parts) + " ⟩"),
                 flush=True,
@@ -667,8 +672,9 @@ class Repl:
         else:
             trigger = "off"
         rows = [
-            ("provider", self.settings.provider or "custom"),
-            ("model", provider.model),
+            # Named together, as `/model` writes them: the model alone is one
+            # provider's catalogue and says nothing about the endpoint.
+            ("model", f"{self.settings.provider or 'custom'}/{provider.model}"),
             ("context window", f"{window:,} tokens" if window else "unknown"),
             ("base_url", provider.base_url or "unset"),
             ("api_format", provider.api_format),

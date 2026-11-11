@@ -53,6 +53,7 @@ TEST_PRESETS = {
     ),
 }
 
+
 def _as_file_entry(preset: Preset) -> dict:
     """One preset written the way a settings file would hold it."""
     return {
@@ -409,6 +410,41 @@ def test_status_line_omits_the_threshold_when_compaction_is_disabled(capsys):
     assert "100,000" not in out
 
 
+def test_status_line_names_the_directory_the_run_happened_in(capsys, monkeypatch):
+    # Tests run inside ly's own container often, where the host directory is
+    # already in the environment and would win over the session's cwd.
+    monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
+    monkeypatch.delenv("LY_SB_HOST_DIR", raising=False)
+    repl = make_repl()
+    repl.session.cwd = "/tmp/project"
+
+    repl._print_usage(elapsed=2.0, output_tokens=100)
+
+    assert "/tmp/project" in capsys.readouterr().out
+
+
+def test_status_line_names_the_host_directory_inside_a_container(capsys, monkeypatch):
+    """The mount point `/workspace` says nothing about where the user is."""
+    monkeypatch.setenv("LY_SB_IN_CONTAINER", "1")
+    monkeypatch.setenv("LY_SB_HOST_DIR", "/Users/someone/project")
+    repl = make_repl()
+    repl.session.cwd = "/workspace"
+
+    repl._print_usage(elapsed=2.0, output_tokens=100)
+
+    out = capsys.readouterr().out
+    assert "/Users/someone/project" in out
+    assert "/workspace" not in out
+
+
+def test_status_line_leaves_out_the_elapsed_time(capsys):
+    make_repl()._print_usage(elapsed=2.0, output_tokens=100)
+
+    out = capsys.readouterr().out
+    assert "2.0s" not in out
+    assert "50 tok/s" in out  # the rate still needs the elapsed time
+
+
 # -- environment variables: the CLI is the only place that reads them ---------
 
 
@@ -649,4 +685,4 @@ def test_config_names_the_provider_in_effect(monkeypatch, capsys, tmp_path):
     repl._command("/config")
 
     out = capsys.readouterr().out
-    assert "provider" in out and "deepseek" in out
+    assert "deepseek/deepseek-reasoner" in out

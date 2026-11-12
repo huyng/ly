@@ -35,7 +35,7 @@ SANDBOX_PREFIX = "LY_SB_"
 
 #: Host-only switches: they choose what to start, so the container has no use for
 #: them. `LY_SB_` covers the rest of the variables that stay behind.
-NOT_FORWARDED = frozenset({"LY_DOCKER", "LY_DOCKER_IMAGE"})
+NOT_FORWARDED = frozenset({"LY_SANDBOX", "LY_SANDBOX_IMAGE"})
 
 
 def in_container() -> bool:
@@ -124,7 +124,7 @@ def docker_command(
             session store. Passed in rather than read here, so the CLI's one
             resolved value is the only answer to where sessions live.
         image: The image to start. Callers take it from the `--sandbox` flag
-            or `LY_DOCKER_IMAGE`, so this function never reads the environment.
+            or `LY_SANDBOX_IMAGE`, so this function never reads the environment.
         keep_id: Map the container process to this uid instead of passing an
             explicit `--user`. Needed for podman, whose user namespace maps
             container root to the host user and everything else to a subuid.

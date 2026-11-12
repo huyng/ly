@@ -131,15 +131,15 @@ def test_the_api_key_comes_from_the_environment_only(tmp_path):
     assert Settings.load(path, env={"LY_API_KEY": "sk-env"}).api_key == "sk-env"
 
 
-def test_docker_off_in_the_environment_means_no_sandbox():
-    assert Settings.load(env={"LY_DOCKER": "0"}).sandbox is False
-    assert Settings.load(env={"LY_DOCKER": "1"}).sandbox is True
+def test_sandbox_off_in_the_environment_means_no_sandbox():
+    assert Settings.load(env={"LY_SANDBOX": "0"}).sandbox is False
+    assert Settings.load(env={"LY_SANDBOX": "1"}).sandbox is True
     assert Settings.load(env={}).sandbox is True  # sandboxed unless told otherwise
 
 
 def test_the_docker_image_comes_from_the_environment():
     assert Settings.load(env={}).image is None
-    assert Settings.load(env={"LY_DOCKER_IMAGE": "python:3.13"}).image == (
+    assert Settings.load(env={"LY_SANDBOX_IMAGE": "python:3.13"}).image == (
         "python:3.13"
     )
 
@@ -192,15 +192,16 @@ def test_compaction_comes_from_the_environment(tmp_path):
     settings = Settings.load(
         write(tmp_path, {}),
         env={
-            "LY_COMPACT": "0",
             "LY_COMPACT_THRESHOLD": "8000",
             "LY_COMPACT_KEEP_TURNS": "2",
             "LY_COMPACT_INPUT_TOKENS": "500",
         },
     )
 
+    # Only the sizes are settable from the environment; whether compaction is
+    # on at all is the settings file's business.
     assert settings.compaction == CompactionConfig(
-        enabled=False, threshold_tokens=8000, keep_turns=2, max_summary_input_tokens=500
+        threshold_tokens=8000, keep_turns=2, max_summary_input_tokens=500
     )
 
 

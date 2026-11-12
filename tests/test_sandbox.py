@@ -73,10 +73,10 @@ def test_the_sandbox_flag_names_the_image():
 
 
 def test_the_image_defaults_to_the_environment_then_the_builtin(monkeypatch):
-    monkeypatch.delenv("LY_DOCKER_IMAGE", raising=False)
+    monkeypatch.delenv("LY_SANDBOX_IMAGE", raising=False)
     assert options().image == sandbox.DEFAULT_IMAGE
 
-    monkeypatch.setenv("LY_DOCKER_IMAGE", "python:3.13")
+    monkeypatch.setenv("LY_SANDBOX_IMAGE", "python:3.13")
     assert options().image == "python:3.13"
     assert options("-s", "example/ly:1").image == "example/ly:1"
 
@@ -179,7 +179,7 @@ def test_command_runs_the_local_ly_and_keeps_its_sessions(monkeypatch, tmp_path)
 def test_command_forwards_ly_and_terminal_variables_only(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("LY_MODEL", "gpt-4.1")
-    monkeypatch.setenv("LY_DOCKER", "1")
+    monkeypatch.setenv("LY_SANDBOX", "1")
     monkeypatch.setenv("HOME_UNRELATED", "nope")
     monkeypatch.setenv("TERM", "xterm-256color")
 
@@ -187,18 +187,19 @@ def test_command_forwards_ly_and_terminal_variables_only(monkeypatch, tmp_path):
 
     assert "--env=LY_MODEL=gpt-4.1" in command
     assert "--env=TERM=xterm-256color" in command
-    assert "--env=LY_DOCKER=1" not in command
+    assert "--env=LY_SANDBOX=1" not in command
     assert not any("HOME_UNRELATED" in part for part in command)
 
 
 def test_host_only_switches_are_not_forwarded(monkeypatch):
-    """`LY_DOCKER*` chose what to start; the container has no use for them."""
-    monkeypatch.setenv("LY_DOCKER", "1")
-    monkeypatch.setenv("LY_DOCKER_IMAGE", "python:3.13")
+    """`LY_SANDBOX` and `LY_SANDBOX_IMAGE` chose what to start; the container
+    has no use for them."""
+    monkeypatch.setenv("LY_SANDBOX", "1")
+    monkeypatch.setenv("LY_SANDBOX_IMAGE", "python:3.13")
 
     forwarded = sandbox.forwarded_env()
 
-    assert not any("LY_DOCKER" in part for part in forwarded)
+    assert not any("LY_SANDBOX" in part for part in forwarded)
 
 
 def test_container_facts_are_never_forwarded(monkeypatch):
@@ -271,17 +272,17 @@ def test_an_unset_provider_key_is_not_forwarded(monkeypatch):
 
 def test_hand_off_is_the_default_but_can_be_turned_off(monkeypatch):
     monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
-    monkeypatch.delenv("LY_DOCKER", raising=False)
+    monkeypatch.delenv("LY_SANDBOX", raising=False)
     assert use_container(options()) is True
     assert use_container(options("--nosandbox")) is False
 
-    monkeypatch.setenv("LY_DOCKER", "0")
+    monkeypatch.setenv("LY_SANDBOX", "0")
     assert use_container(options()) is False
 
 
 def test_help_and_version_never_start_a_container(monkeypatch, capsys):
     monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
-    monkeypatch.delenv("LY_DOCKER", raising=False)
+    monkeypatch.delenv("LY_SANDBOX", raising=False)
     monkeypatch.setattr(sandbox, "exec_in_docker", _must_not_run)
 
     for flag in ("--version", "--help"):
@@ -306,8 +307,8 @@ def test_a_real_run_hands_the_whole_command_line_to_docker(monkeypatch):
         raise SystemExit(0)
 
     monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
-    monkeypatch.delenv("LY_DOCKER", raising=False)
-    monkeypatch.delenv("LY_DOCKER_IMAGE", raising=False)
+    monkeypatch.delenv("LY_SANDBOX", raising=False)
+    monkeypatch.delenv("LY_SANDBOX_IMAGE", raising=False)
     monkeypatch.setenv("LY_MODEL", "openai/gpt-4.1")
     monkeypatch.setenv("LY_API_KEY", "sk-test")
     monkeypatch.setattr(sandbox, "exec_in_docker", record)
@@ -333,8 +334,8 @@ def test_the_sandbox_flag_reaches_docker(monkeypatch):
         raise SystemExit(0)
 
     monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
-    monkeypatch.delenv("LY_DOCKER", raising=False)
-    monkeypatch.delenv("LY_DOCKER_IMAGE", raising=False)
+    monkeypatch.delenv("LY_SANDBOX", raising=False)
+    monkeypatch.delenv("LY_SANDBOX_IMAGE", raising=False)
     monkeypatch.setenv("LY_MODEL", "openai/gpt-4.1")
     monkeypatch.setenv("LY_API_KEY", "sk-test")
     monkeypatch.setattr(sandbox, "exec_in_docker", record)
@@ -416,7 +417,7 @@ def clean_providers(monkeypatch, tmp_path) -> None:
     """No settings file, and no `LY_*` sandbox setting from the machine."""
     monkeypatch.setattr("ly.settings.DEFAULT_PATH", str(tmp_path / "absent.json"))
     monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
-    monkeypatch.delenv("LY_DOCKER", raising=False)
+    monkeypatch.delenv("LY_SANDBOX", raising=False)
 
 
 def test_every_presets_key_variable_is_carried(monkeypatch, tmp_path):

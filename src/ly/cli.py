@@ -98,7 +98,7 @@ HELP = """\
 
 def use_container(args: argparse.Namespace) -> bool:
     """Return True when this process should hand off to `docker run` first."""
-    # LY_DOCKER is not read here: it reached us through `Settings`, which turned
+    # LY_SANDBOX is not read here: it reached us through `Settings`, which turned
     # it into the parser's default for `--nosandbox`.
     return not (sandbox.in_container() or args.nosandbox)
 

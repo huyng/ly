@@ -239,7 +239,7 @@ def _from_env(env) -> dict:
         ("model", "LY_MODEL"),
         ("base_url", "LY_BASE_URL"),
         ("api_key", "LY_API_KEY"),
-        ("image", "LY_DOCKER_IMAGE"),
+        ("image", "LY_SANDBOX_IMAGE"),
     ):
         text = env.get(variable)
         if text:
@@ -261,16 +261,13 @@ def _from_env(env) -> dict:
     reasoning = _tri_state(env.get("LY_PASS_REASONING_CONTENT"))
     if reasoning is not None:
         values["pass_reasoning_content"] = reasoning
-    docker = _tri_state(env.get("LY_DOCKER"))
-    if docker is not None:
-        # `LY_DOCKER=0` means "do not use a container", which is exactly what
+    sandbox = _tri_state(env.get("LY_SANDBOX"))
+    if sandbox is not None:
+        # `LY_SANDBOX=0` means "do not use a container", which is exactly what
         # `sandbox: false` says, so the value carries over as it is.
-        values["sandbox"] = docker
+        values["sandbox"] = sandbox
 
     compaction: dict = {}
-    enabled = _tri_state(env.get("LY_COMPACT"))
-    if enabled is not None:
-        compaction["enabled"] = enabled
     for name, variable in COMPACTION_INTS:
         number = _integer(env.get(variable))
         if number is not None:

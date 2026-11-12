@@ -92,7 +92,7 @@ def libedit_repl():
     repl = Repl.__new__(Repl)
     repl._pastes = {}
     repl.settings = Settings.load(env={"LY_MODEL": "openai/gpt-4.1", "LY_API_KEY": "k"})
-    repl._models = [repl.settings.model]
+    repl._models = [repl.settings.model or ""]
     return repl
 
 

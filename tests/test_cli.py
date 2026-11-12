@@ -241,6 +241,16 @@ def test_tab_offers_the_whole_reference_when_the_word_is_the_reference(
     ]
 
 
+def config_values(out: str) -> dict[str, str]:
+    """Parse `/config` output, which is one `name value` pair per line."""
+    values: dict[str, str] = {}
+    for line in out.splitlines():
+        if line.strip():
+            name, value = line.split(maxsplit=1)
+            values[name] = value.strip()
+    return values
+
+
 def test_config_shows_the_settings_in_effect(capsys):
     repl = make_repl(threshold_tokens=8000)
     repl.session.set_model("switched-model")
@@ -249,10 +259,20 @@ def test_config_shows_the_settings_in_effect(capsys):
     repl._command("/config")
 
     out = capsys.readouterr().out
-    assert "switched-model" in out  # the live model, not the starting one
-    assert "8,000 tokens" in out
-    assert "thinking" in out and "hidden" in out
-    assert "fake" in out  # the base URL
+    settings = config_values(out)
+    assert settings["model"].endswith("switched-model")  # live, not the start
+    assert settings["compaction.threshold_tokens"] == "8000"
+    assert settings["thinking"] == "false"
+    assert settings["base_url"] == "fake"
+
+
+def test_config_lines_the_values_up_in_one_column(capsys):
+    make_repl()._command("/config")
+
+    lines = capsys.readouterr().out.splitlines()
+    # Where each value starts: the line length less the value itself.
+    columns = {len(line) - len(line.split(maxsplit=1)[1]) for line in lines}
+    assert len(columns) == 1
 
 
 def test_config_never_prints_the_api_key(capsys):
@@ -263,7 +283,7 @@ def test_config_never_prints_the_api_key(capsys):
 
     out = capsys.readouterr().out
     assert "sk-secret-1234" not in out
-    assert "api key" in out and "set (redacted)" in out
+    assert config_values(out)["api_key"] == "set"
 
 
 def test_config_says_when_no_api_key_is_set(capsys):
@@ -272,8 +292,7 @@ def test_config_says_when_no_api_key_is_set(capsys):
 
     repl._command("/config")
 
-    out = capsys.readouterr().out
-    assert "none set" in out
+    assert config_values(capsys.readouterr().out)["api_key"] == "unset"
 
 
 def sessions_repl(monkeypatch, tmp_path, *prompts) -> Repl:
@@ -534,13 +553,32 @@ def test_no_provider_option_is_a_flag(monkeypatch):
             build_parser().parse_args([flag, "x"])
 
 
+def test_config_picks_the_settings_file_to_read(monkeypatch, tmp_path):
+    """`--config` names the file, so a model written there is the one used."""
+    from ly.cli import main
+
+    path = tmp_path / "custom.json"
+    path.write_text(json.dumps({"model": "deepseek/deepseek-chat"}), encoding="utf-8")
+    for name in ("LY_MODEL", "LY_API_KEY", "DEEPSEEK_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    with pytest.raises(SystemExit) as exited:
+        main(["--config", str(path), "-p", "hi"])
+
+    # The file supplied the model, so the missing piece is the key: the default
+    # settings path, which has no model, would have said so instead.
+    message = str(exited.value)
+    assert "Missing credentials" in message
+    assert "DEEPSEEK_API_KEY" in message
+
+
 def test_a_sessions_directory_that_cannot_be_written_is_explained(monkeypatch):
     """The traceback would be about os.mkdir; name the directory instead."""
     from ly.cli import main
     from ly.session import SessionManager
 
     monkeypatch.setenv("LY_SB_IN_CONTAINER", "1")
-    monkeypatch.delenv("LY_MODEL", raising=False)
+    monkeypatch.setenv("LY_MODEL", "openai/gpt-4.1")
     monkeypatch.setenv("LY_BASE_URL", "https://x/v1")
     monkeypatch.setenv("LY_API_KEY", "test")
 

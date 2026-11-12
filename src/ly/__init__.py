@@ -45,16 +45,18 @@ def create_agent_session(
             session uses `DEFAULT_SESSIONS_DIR`; `persistent=False` writes
             nothing at all and keeps the transcript in memory.
     """
-    from .presets import DEFAULT_MODEL
     from .prompts import build_system_prompt
     from .providers import make_backend
     from .settings import DEFAULT_SESSIONS_DIR, Settings
 
     # One resolution path: the reference names its endpoint, wire format and
     # key variable, so nothing here restates a default the CLI would not use.
+    # A caller that passes no model gets `MissingModelError` from
+    # `make_provider`, exactly as the CLI would, rather than a model nobody
+    # asked for.
     settings = Settings.load(
         env={},
-        model=model or DEFAULT_MODEL,
+        model=model,
         base_url=base_url,
         api_key=api_key,
         api_format=api_format,

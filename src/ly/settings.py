@@ -15,12 +15,13 @@ default. The API key is the exception to the file: it is read from `LY_API_KEY`
 or the selected provider's own variable, so a copy of the file can be shared
 without leaking it.
 
-The model is always written `provider/model`, and the provider half names a
-preset in `ly/presets.py`, which supplies the endpoint, the wire format and the
-variables its key hides in. Everything named above still wins over that preset,
-so the provider is a default, not a mode. A model without a provider names
-nowhere and is rejected when it is resolved, not when it is read; see
-`make_provider`.
+The model is written `provider/model`, and the provider half names a preset in
+`ly/presets.py`, which supplies the endpoint, the wire format and the variables
+its key hides in. Everything named above still wins over that preset, so the
+provider is a default, not a mode. There is no built-in model: with none
+configured, `make_provider` raises rather than aim a request somewhere nobody
+chose. A model without a provider names nowhere, and is rejected the same way
+when it is resolved, not when it is read.
 """
 
 import json
@@ -30,9 +31,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .compaction import CompactionConfig, for_window
-from .presets import BUILT_IN, DEFAULT_MODEL, Model, Preset, split
+from .presets import BUILT_IN, Model, Preset, split
 from .providers import Provider
-from .providers.errors import MissingCredentialsError, UnknownProviderError
+from .providers.errors import (
+    MissingCredentialsError,
+    MissingModelError,
+    UnknownProviderError,
+)
 
 DEFAULT_PATH = "~/.ly/settings.json"
 
@@ -180,22 +185,25 @@ def _from_file(path: str | Path | None) -> dict:
     return values
 
 
-def _model_of(presets: Mapping[str, Preset], reference: str) -> Model | None:
+def _model_of(presets: Mapping[str, Preset], reference: str | None) -> Model | None:
     """What the reference's preset says about that model, if anything."""
+    if not reference:
+        return None
     name, model = split(reference)
     preset = presets.get(name)
     return preset.models.get(model) if preset else None
 
 
 def _compaction(
-    explicit: dict, presets: Mapping[str, Preset], reference: str
+    explicit: dict, presets: Mapping[str, Preset], reference: str | None
 ) -> CompactionConfig:
     """Size compaction to the model in use, then let explicit keys win.
 
     Args:
         explicit: Keys from the settings file and environment.
         presets: The presets in force, built-in plus declared.
-        reference: The `provider/model` reference in use.
+        reference: The `provider/model` reference in use, or None when none is
+            configured.
 
     Returns:
         A context window's worth of defaults, unless a model or the user said
@@ -278,8 +286,15 @@ class Settings:
     # Built-in presets plus whatever the file added, keyed by name. The model's
     # provider half is looked up here.
     presets: dict[str, Preset] = field(default_factory=lambda: dict(BUILT_IN))
-    # Always a `provider/model` reference, so no request can be aimed nowhere.
-    model: str = DEFAULT_MODEL
+    # A `provider/model` reference, or None when nothing configured one. The
+    # provider half is what aims a request; without it `make_provider` refuses.
+    model: str | None = None
+    # The file these values came from, or None when nothing was read. Kept so
+    # a later `load` (a `/model` switch, the docker mount) reads the same file
+    # rather than silently falling back to the default path. Excluded from
+    # equality: two settings objects are the same preferences however the
+    # files holding them are named.
+    path: Path | None = field(default=None, compare=False, repr=False)
     base_url: str | None = None
     api_format: str | None = None
     api_key: str | None = None
@@ -313,7 +328,8 @@ class Settings:
         """Merge the settings file and the environment, environment winning.
 
         Args:
-            path: File to read, defaulting to `~/.ly/settings.json`.
+            path: File to read, defaulting to `~/.ly/settings.json`. Recorded on
+                the result, so a later `load` can name the same file.
             env: Variables to read, defaulting to `os.environ`. Passed in so
                 tests need not patch the process environment.
             model: Model reference to use instead of the one the file or
@@ -348,29 +364,32 @@ class Settings:
             "api_format": api_format if api_format in API_FORMATS else None,
         }
         values |= {name: value for name, value in given.items() if value}
-        values.setdefault("model", DEFAULT_MODEL)
         # The provider half of the model is what picks the endpoint and the
         # variable the key hides in. A half that matches no preset is not an
         # error yet: the endpoint can still have been set by hand.
-        preset = presets.get(split(values["model"])[0])
+        reference = values.get("model")
+        preset = presets.get(split(reference)[0]) if reference else None
         if preset is not None:
             _apply_preset(values, preset, environment)
         return cls(
-            compaction=_compaction(compaction, presets, values["model"]),
+            compaction=_compaction(compaction, presets, reference),
             presets=presets,
+            path=Path(path).expanduser() if path else None,
             **values,
         )
 
     @property
     def provider(self) -> str | None:
-        """Name of the preset the model names, None when it names none."""
+        """Name of the preset the model names, None when none is set or named."""
+        if not self.model:
+            return None
         name, _ = split(self.model)
         return name if name in self.presets else None
 
     @property
     def model_name(self) -> str:
-        """The half of the model reference that is sent to the endpoint."""
-        return split(self.model)[1]
+        """The half of the model reference sent to the endpoint; "" if unset."""
+        return split(self.model)[1] if self.model else ""
 
     @property
     def context_window(self) -> int | None:
@@ -406,11 +425,14 @@ class Settings:
             A `Provider` the backends can read on each request.
 
         Raises:
+            MissingModelError: No model was configured at all.
             UnknownProviderError: The model reference names no known provider,
                 which includes naming no provider at all.
             MissingCredentialsError: No API key is configured.
             MissingBaseURLError: No endpoint is configured.
         """
+        if not self.model:
+            raise MissingModelError()
         if self.provider is None:
             known = ", ".join(f"{name}/*" for name in sorted(self.presets))
             raise UnknownProviderError(self.model, known)

@@ -9,7 +9,11 @@ from ly.agent import AgentSession
 from ly.cli import Repl, build_parser
 from ly.compaction import CompactionConfig
 from ly.providers.backend import ModelBackend
-from ly.providers.errors import MissingCredentialsError, UnknownProviderError
+from ly.providers.errors import (
+    MissingCredentialsError,
+    MissingModelError,
+    UnknownProviderError,
+)
 from ly.providers.provider import Provider
 from ly.session import SessionManager
 from ly.settings import Settings
@@ -26,14 +30,14 @@ def read(path) -> Settings:
     return Settings.load(path, env={})
 
 
-def test_a_missing_file_means_defaults(tmp_path):
+def test_a_missing_file_means_no_model_and_no_endpoint(tmp_path):
+    """Every key is optional, and there is no built-in model to fall back to:
+    nothing aims a request until something names a provider."""
     settings = read(tmp_path / "absent.json")
 
-    # The default model names openai, so its endpoint comes along with it.
-    assert (settings.model, settings.base_url) == (
-        "openai/gpt-4.1",
-        "https://api.openai.com/v1",
-    )
+    assert (settings.model, settings.base_url) == (None, None)
+    with pytest.raises(MissingModelError):
+        settings.make_provider()
 
 
 def test_a_malformed_file_does_not_stop_ly(tmp_path):
@@ -401,12 +405,13 @@ def test_a_file_provider_can_point_a_built_in_at_a_proxy(tmp_path):
         {"providers": {"openai": {"base_url": "https://proxy.test/v1"}}},
     )
 
-    settings = Settings.load(path, env={"OPENAI_API_KEY": "sk-openai"})
+    settings = Settings.load(
+        path, env={"LY_MODEL": "openai/gpt-4.1", "OPENAI_API_KEY": "sk-openai"}
+    )
 
     assert settings.base_url == "https://proxy.test/v1"
-    # The key variable stays the built-in one, and the default model names it.
+    # The key variable stays the built-in one, which the model's provider names.
     assert settings.api_key == "sk-openai"
-    assert settings.model == "openai/gpt-4.1"
 
 
 def test_a_proxied_provider_keeps_its_own_dialect(tmp_path):

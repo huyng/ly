@@ -22,20 +22,24 @@ hides in, so the only thing you supply is the key. DeepSeek and OpenAI are
 built in; any other OpenAI-compatible endpoint is declared once in the
 settings file.
 
+There is no default model: say which one you want once, and the key is enough.
+
 ```bash
 export LY_MODEL=deepseek/deepseek-chat
 export DEEPSEEK_API_KEY=sk-       # or LY_API_KEY for either
 ```
 
-With one generic key and nothing else, ly asks OpenAI for `gpt-4.1`:
-
-```bash
-export LY_API_KEY=sk-
-```
-
 ```bash
 export LY_MODEL=mygateway/house-model   # after declaring `mygateway` below
 export MYGW_API_KEY=sk-
+```
+
+Without a model, `ly` stops at startup and says how to set one, rather than
+choosing an endpoint you did not ask for. The same value can be written in the
+settings file instead:
+
+```json
+{ "model": "deepseek/deepseek-chat" }
 ```
 
 The provider half has to be one ly knows, so a private endpoint is declared
@@ -49,7 +53,7 @@ one exists. These are read by `ly` itself:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `LY_MODEL` | `openai/gpt-4.1` | Model to ask for, always as `provider/model`; the provider names a preset that supplies the endpoint |
+| `LY_MODEL` | — (required) | Model to ask for, always as `provider/model`; the provider names a preset that supplies the endpoint |
 | `LY_API_KEY` | — | API key for the provider (required, unless the preset's own variable is set) |
 | `LY_BASE_URL` | from the preset | OpenAI-compatible base URL, such as `https://api.openai.com/v1` |
 | `LY_API_FORMAT` | from the preset | Wire format: `openai-completions` for `/chat/completions`, `openai-responses` for `/responses` |
@@ -83,8 +87,9 @@ container and are not meant to be set by hand; see
 ### Settings file
 
 Anything you would otherwise export can live in `~/.ly/settings.json`
-instead. Every key is optional, and a missing or malformed file simply means
-defaults, so a typo cannot stop `ly` from starting.
+instead. Every key is optional except `model`, and a missing or malformed file
+simply means no settings, so a typo cannot stop `ly` from starting — though
+with no model it will stop and ask for one.
 
 ```json
 {
@@ -99,7 +104,7 @@ defaults, so a typo cannot stop `ly` from starting.
 ```
 
 An `LY_*` variable beats this file, which beats the built-in default:
-`LY_MODEL=openai/gpt-4.1 ly` overrides `"model"` here for one run. The
+`LY_MODEL=deepseek/deepseek-chat ly` overrides `"model"` here for one run. The
 environment is read in one place, `ly/settings.py`, which is also where the
 file is read, so there is a single answer to "where did this value come
 from?". `sandbox: false` is the same as `LY_DOCKER=0` or passing
@@ -152,8 +157,13 @@ ly "fix the failing tests"         # start with an initial prompt
 ly -p "what does this repo do?"    # print mode: run once, write final response
 ly --resume 2                      # resume a previous session
 ly -s python:3.12                  # run in the named Docker image
+ly --config ./ly.local.json        # read another settings file
 LY_MODEL=deepseek/deepseek-chat ly # one run, one model
 ```
+
+The settings file is `~/.ly/settings.json` unless `--config PATH` names another
+one. Inside the container the named file is mounted at that same default path,
+so both sides read one file and cannot disagree.
 
 ### Switching models and providers
 

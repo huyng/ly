@@ -40,6 +40,23 @@ class MissingCredentialsError(ProviderError):
         )
 
 
+class MissingModelError(ProviderError):
+    """No model was configured at all.
+
+    Raised before an endpoint is resolved, so the message names the ways to
+    supply a reference rather than complaining about one that was never
+    written.
+    """
+
+    def __init__(self):
+        super().__init__(
+            'No model configured. Set LY_MODEL, or "model" in '
+            "~/.ly/settings.json (or the file --config names), as "
+            "provider/model.",
+            retryable=False,
+        )
+
+
 class MissingBaseURLError(ProviderError):
     def __init__(self):
         super().__init__("Missing base URL. Set LY_BASE_URL.", retryable=False)

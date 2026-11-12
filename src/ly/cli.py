@@ -44,6 +44,7 @@ from .providers import Provider, make_backend
 from .providers.errors import (
     MissingBaseURLError,
     MissingCredentialsError,
+    MissingModelError,
     UnknownProviderError,
 )
 from .render import (
@@ -53,7 +54,7 @@ from .render import (
     summarize_tool_call,
 )
 from .session import SYNOPSIS_CHARS, SessionManager
-from .settings import Settings
+from .settings import DEFAULT_PATH, Settings
 from .spinner import Spinner
 from .theme import BAND, DIM, RESET, SHADE, Theme, get_theme, terminal_width
 from .tools import default_tools
@@ -140,8 +141,9 @@ class Repl:
         self._pastes: dict[str, str] = {}
         # References this session has used, newest last. The presets list the
         # models they know, but any reference is legal, so what was typed
-        # before stays worth offering.
-        self._models = [preferences.model]
+        # before stays worth offering. Nothing is typed yet when no model is
+        # configured, so the list starts empty rather than holding None.
+        self._models = [preferences.model] if preferences.model else []
 
         self.session.subscribe(self._on_event)
         self._text_started = False
@@ -332,7 +334,7 @@ class Repl:
         theme = self.theme
         print(
             f"{theme.bold('ly')} {theme.dim('v' + __version__)} {theme.dim('·')} "
-            f"{theme.model(self.settings.model)}"
+            f"{theme.model(self.settings.model or 'no model')}"
         )
         print(theme.dim(f"  • session {self.session.session_manager.file}"))
         if sandbox.in_container():
@@ -635,8 +637,9 @@ class Repl:
         """
         # Resolved again rather than patched: the new provider brings its own
         # endpoint, wire format and key variable, and `Settings` is where those
-        # are read. An unknown provider raises inside `make_provider`.
-        fresh = Settings.load(model=text)
+        # are read. An unknown provider raises inside `make_provider`. The same
+        # file is read again, so a --config run keeps its preferences.
+        fresh = Settings.load(path=self.settings.path, model=text)
         try:
             provider = fresh.make_provider()
         except (
@@ -657,39 +660,45 @@ class Repl:
             self._models.append(text)
 
     def _print_config(self) -> None:
-        """Print the settings in effect, reading live values where they can change.
+        """Print the name and value of every setting in effect, one per line.
 
-        The provider, model and the two toggles can be switched mid-session, so
-        they come from the session and this object rather than from the
-        `Settings` that started the run. The API key is reported as set or
+        Values are read live where they can change mid-session: the model, the
+        provider it points at, and the two toggles. Numbers are printed as
+        stored rather than formatted, and the API key is reported as set or
         unset, never printed.
         """
+
+        def flag(value: bool) -> str:
+            return "true" if value else "false"
+
         provider = self.session.backend.provider
         compaction = self.session.compaction
         window = self.settings.context_window
-        if compaction.enabled:
-            trigger = f"on, {compaction.threshold_tokens:,} tokens"
-        else:
-            trigger = "off"
         rows = [
-            # Named together, as `/model` writes them: the model alone is one
+            # Both halves, as `/model` writes them: a bare model name is one
             # provider's catalogue and says nothing about the endpoint.
             ("model", f"{self.settings.provider or 'custom'}/{provider.model}"),
-            ("context window", f"{window:,} tokens" if window else "unknown"),
+            ("context_window", str(window) if window else "unknown"),
             ("base_url", provider.base_url or "unset"),
             ("api_format", provider.api_format),
-            ("api key", "set (redacted)" if provider.api_key else "none set"),
-            ("pass reasoning", "on" if provider.pass_reasoning_content else "off"),
-            ("markdown", "on" if self.markdown else "off"),
-            ("thinking", "shown" if self.show_thinking else "hidden"),
-            ("sandbox", "container" if sandbox.in_container() else "host"),
-            ("compaction", trigger),
-            ("keep turns", str(compaction.keep_turns)),
-            ("summary cap", f"{compaction.max_summary_input_tokens:,} tokens"),
+            ("api_key", "set" if provider.api_key else "unset"),
+            ("pass_reasoning_content", flag(provider.pass_reasoning_content)),
+            ("markdown", flag(self.markdown)),
+            ("thinking", flag(self.show_thinking)),
+            ("sandbox", flag(sandbox.in_container())),
+            ("compaction.enabled", flag(compaction.enabled)),
+            ("compaction.threshold_tokens", str(compaction.threshold_tokens)),
+            ("compaction.keep_turns", str(compaction.keep_turns)),
+            (
+                "compaction.max_summary_input_tokens",
+                str(compaction.max_summary_input_tokens),
+            ),
         ]
-        width = max(len(label) for label, _ in rows)
-        for label, value in rows:
-            print(f"{self.theme.dim(label.ljust(width) + ':')} {value}")
+        # Padded, so the values line up in one column, but plain text: no
+        # colons and no colour, so the output stays copy-pasteable.
+        width = max(len(name) for name, _ in rows)
+        for name, value in rows:
+            print(f"{name.ljust(width)} {value}")
 
     def _command(self, line: str) -> bool:
         """Handle a slash command. Returns True to exit."""
@@ -709,7 +718,9 @@ class Repl:
         elif command == "/model":
             if arg:
                 self._switch_model(arg)
-            print(f"{theme.dim('model:')} {theme.model(self.settings.model)}")
+            print(
+                f"{theme.dim('model:')} {theme.model(self.settings.model or 'unset')}"
+            )
         elif command == "/tools":
             for tool in self.session.tools.values():
                 first = tool.description.split(". ")[0]
@@ -848,14 +859,61 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
         help=f"Docker image to run ly in (default: {sandbox.DEFAULT_IMAGE})",
     )
     parser.add_argument("--version", action="version", version=f"ly {__version__}")
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help=f"settings file to read (default: {DEFAULT_PATH})",
+    )
     return parser
+
+
+def _config_path(argv: list[str]) -> str | None:
+    """Read `--config` before the rest of the command line is parsed.
+
+    The parser's own defaults come from the settings, so the file has to be
+    chosen first. Every other flag is left to the real parser.
+
+    Args:
+        argv: The command line, without the program name.
+
+    Returns:
+        The path given, or None when the flag is absent.
+    """
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--config")
+    known, _ = parser.parse_known_args(argv)
+    return known.config
+
+
+def _without_config(argv: list[str]) -> list[str]:
+    """Return the command line with `--config` and its value removed.
+
+    The container reads the file where the host mounted it, at the container's
+    own default path, so a host path forwarded inside would name nothing.
+
+    Args:
+        argv: The command line, without the program name.
+
+    Returns:
+        The arguments to forward to the container-side ly.
+    """
+    kept: list[str] = []
+    skip = False
+    for arg in argv:
+        if skip:
+            skip = False
+        elif arg == "--config":
+            skip = True
+        elif not arg.startswith("--config="):
+            kept.append(arg)
+    return kept
 
 
 def main(argv: list[str] | None = None) -> None:
     argv = list(sys.argv[1:] if argv is None else argv)
     # Read once, here: below this point the values travel as arguments, and the
     # container only sees them through the mounts and flags.
-    settings = Settings.load()
+    settings = Settings.load(path=_config_path(argv))
     # Parse here rather than in the container: `--help`, `--version` and a bad
     # argument all exit during parsing, so none of them starts a container.
     args = build_parser(settings).parse_args(argv)
@@ -863,15 +921,21 @@ def main(argv: list[str] | None = None) -> None:
         # Before the container: a stale or misspelled model should fail once,
         # where it was set, rather than inside a container that then exits.
         provider = settings.make_provider()
-    except (MissingCredentialsError, MissingBaseURLError, UnknownProviderError) as exc:
+    except (
+        MissingCredentialsError,
+        MissingModelError,
+        MissingBaseURLError,
+        UnknownProviderError,
+    ) as exc:
         sys.exit(str(exc))
     if use_container(args):
         # The container rebuilds its settings from what it inherits, so a key
         # kept under the provider's own name has to travel with it.
         sandbox.exec_in_docker(
-            argv,
+            _without_config(argv),
             sessions_dir=settings.sessions_dir,
             image=args.image,
+            settings_file=settings.path,
             extra_env=settings.key_variables,
         )
 

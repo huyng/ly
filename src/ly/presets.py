@@ -56,10 +56,6 @@ class Preset:
     models: dict[str, Model] = field(default_factory=dict)
 
 
-#: What ly asks for when nothing says otherwise, so a key and nothing else is
-#: enough to start. The provider is part of it: a bare model names nowhere.
-DEFAULT_MODEL = "openai/gpt-4.1"
-
 #: Providers ly knows without being told. A settings file may add more under
 #: `providers`, or override one of these to point it at a proxy.
 BUILT_IN: dict[str, Preset] = {
@@ -69,7 +65,7 @@ BUILT_IN: dict[str, Preset] = {
         models={
             "gpt-6.1-sol": Model(context_window=1_047_576),
             "gpt-6.1-terra": Model(context_window=1_047_576),
-            "gpt-6-astra": Model(context_window=1_047_576)
+            "gpt-6-astra": Model(context_window=1_047_576),
         },
     ),
     "deepseek": Preset(

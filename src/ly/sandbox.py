@@ -114,6 +114,7 @@ def docker_command(
     image: str = DEFAULT_IMAGE,
     keep_id: bool = False,
     extra_env: tuple[str, ...] = (),
+    settings_file: Path | None = None,
 ) -> list[str]:
     """Build the `docker run` command that re-runs ly inside a container.
 
@@ -129,6 +130,8 @@ def docker_command(
             container root to the host user and everything else to a subuid.
         extra_env: Non-`LY_*` variables the container-side ly needs, such as the
             selected provider's key variable.
+        settings_file: The settings file to mount, from `--config`. None means
+            the default path, which is what a run without the flag reads.
 
     Returns:
         A ready-to-exec argv list starting with `docker`.
@@ -172,9 +175,11 @@ def docker_command(
         command += ["-v", f"{user_agents}:{CONTAINER_HOME}/.agents:ro"]
     # The settings file is read through HOME too. Without it the host applies
     # the user's preferences and the container silently falls back to defaults.
-    settings_file = Path(DEFAULT_PATH).expanduser()
-    if settings_file.is_file():
-        command += ["-v", f"{settings_file}:{CONTAINER_HOME}/.ly/settings.json:ro"]
+    # A `--config` file is mounted at the default path, which is where the
+    # container-side ly looks for it.
+    source = (settings_file or Path(DEFAULT_PATH)).expanduser()
+    if source.is_file():
+        command += ["-v", f"{source}:{CONTAINER_HOME}/.ly/settings.json:ro"]
     # Run the ly that is on the host, not a copy baked into an image.
     package = Path(ly.__file__).parent
     command += ["-v", f"{package}:/opt/ly/ly:ro", "--env=PYTHONPATH=/opt/ly"]
@@ -198,6 +203,7 @@ def exec_in_docker(
     sessions_dir: Path,
     image: str = DEFAULT_IMAGE,
     extra_env: tuple[str, ...] = (),
+    settings_file: Path | None = None,
 ) -> None:
     """Replace this process with `docker run` running ly in the container.
 
@@ -207,6 +213,7 @@ def exec_in_docker(
             and bind-mounted into the container.
         image: The image to start, already resolved by the CLI.
         extra_env: Non-`LY_*` variables to forward; see `forwarded_env`.
+        settings_file: The settings file to mount, from `--config`.
 
     Raises:
         SystemExit: docker is not installed, or the session directory cannot
@@ -224,6 +231,7 @@ def exec_in_docker(
         image=image,
         keep_id=runtime_is_podman(),
         extra_env=extra_env,
+        settings_file=settings_file,
     )
     try:
         os.execvp(command[0], command)

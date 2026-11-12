@@ -502,6 +502,7 @@ def test_create_agent_session_binds_tools_to_the_requested_cwd(tmp_path):
     from ly import create_agent_session
 
     session = create_agent_session(
+        model="openai/gpt-4.1",
         cwd=str(tmp_path),
         persistent=False,
         base_url="https://explicit.example/v1",
@@ -532,6 +533,15 @@ def test_create_agent_session_wants_a_provider_with_its_model():
 
     with pytest.raises(UnknownProviderError):
         create_agent_session(model="gpt-4.1", api_key="test-key", persistent=False)
+
+
+def test_create_agent_session_without_a_model_says_so():
+    """There is no built-in model, so the SDK refuses as the CLI does."""
+    from ly import create_agent_session
+    from ly.providers.errors import MissingModelError
+
+    with pytest.raises(MissingModelError):
+        create_agent_session(api_key="test-key", persistent=False)
 
 
 def failing_backend(reason, *, retryable=False):

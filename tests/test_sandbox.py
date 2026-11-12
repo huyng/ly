@@ -1,5 +1,6 @@
 """The docker hand-off: the command it builds and when it hands off at all."""
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -294,7 +295,12 @@ def test_a_real_run_hands_the_whole_command_line_to_docker(monkeypatch):
     handed_off: list[list[str]] = []
 
     def record(
-        argv: list[str], *, sessions_dir: Path, image: str, extra_env=()
+        argv: list[str],
+        *,
+        sessions_dir: Path,
+        image: str,
+        extra_env=(),
+        settings_file=None,
     ) -> None:
         handed_off.append([image, *argv])
         raise SystemExit(0)
@@ -302,6 +308,7 @@ def test_a_real_run_hands_the_whole_command_line_to_docker(monkeypatch):
     monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
     monkeypatch.delenv("LY_DOCKER", raising=False)
     monkeypatch.delenv("LY_DOCKER_IMAGE", raising=False)
+    monkeypatch.setenv("LY_MODEL", "openai/gpt-4.1")
     monkeypatch.setenv("LY_API_KEY", "sk-test")
     monkeypatch.setattr(sandbox, "exec_in_docker", record)
 
@@ -315,7 +322,12 @@ def test_the_sandbox_flag_reaches_docker(monkeypatch):
     handed_off: list[list[str]] = []
 
     def record(
-        argv: list[str], *, sessions_dir: Path, image: str, extra_env=()
+        argv: list[str],
+        *,
+        sessions_dir: Path,
+        image: str,
+        extra_env=(),
+        settings_file=None,
     ) -> None:
         handed_off.append([image, *argv])
         raise SystemExit(0)
@@ -323,6 +335,7 @@ def test_the_sandbox_flag_reaches_docker(monkeypatch):
     monkeypatch.delenv("LY_SB_IN_CONTAINER", raising=False)
     monkeypatch.delenv("LY_DOCKER", raising=False)
     monkeypatch.delenv("LY_DOCKER_IMAGE", raising=False)
+    monkeypatch.setenv("LY_MODEL", "openai/gpt-4.1")
     monkeypatch.setenv("LY_API_KEY", "sk-test")
     monkeypatch.setattr(sandbox, "exec_in_docker", record)
 
@@ -415,7 +428,12 @@ def test_every_presets_key_variable_is_carried(monkeypatch, tmp_path):
     handed_off: list[tuple[str, ...]] = []
 
     def record(
-        argv: list[str], *, sessions_dir: Path, image: str, extra_env=()
+        argv: list[str],
+        *,
+        sessions_dir: Path,
+        image: str,
+        extra_env=(),
+        settings_file=None,
     ) -> None:
         handed_off.append(extra_env)
         raise SystemExit(0)
@@ -426,6 +444,45 @@ def test_every_presets_key_variable_is_carried(monkeypatch, tmp_path):
         main(["-p", "hello"])
 
     assert handed_off == [("DEEPSEEK_API_KEY", "OPENAI_API_KEY")]
+
+
+def test_a_config_file_is_mounted_where_the_container_reads_it(tmp_path):
+    """`--config` moves the mount source, not the mount point: the container
+    reads its default path, and the host path would mean nothing there."""
+    path = tmp_path / "custom.json"
+    path.write_text("{}")
+
+    command = sandbox.docker_command([], sessions_dir=tmp_path, settings_file=path)
+
+    assert f"{path}:{sandbox.CONTAINER_HOME}/.ly/settings.json:ro" in command
+
+
+def test_config_is_stripped_from_the_container_command_line(monkeypatch, tmp_path):
+    """The file travels as a mount, so forwarding the flag (a host path) would
+    only make the container-side parser reject it."""
+    clean_providers(monkeypatch, tmp_path)
+    path = tmp_path / "custom.json"
+    path.write_text(json.dumps({"model": "deepseek/deepseek-chat"}), encoding="utf-8")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    handed_off: list[tuple[list[str], Path | None]] = []
+
+    def record(
+        argv: list[str],
+        *,
+        sessions_dir: Path,
+        image: str,
+        extra_env=(),
+        settings_file=None,
+    ) -> None:
+        handed_off.append((argv, settings_file))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(sandbox, "exec_in_docker", record)
+
+    with pytest.raises(SystemExit):
+        main(["--config", str(path), "-p", "hello"])
+
+    assert handed_off == [(["-p", "hello"], path)]
 
 
 def test_a_model_without_a_provider_stops_before_docker(monkeypatch, tmp_path):

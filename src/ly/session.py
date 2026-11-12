@@ -171,10 +171,13 @@ class SessionManager:
         stay in `self.entries` and in the JSONL file, so the full transcript
         survives on disk. Only the active leaf moves.
         """
-        self.current_id = None
-        self.append(summary)
-        for message in keep:
-            self.append(message)
+        entries = []
+        parent = None
+        for message in [summary, *keep]:
+            entry = self._entry(message, parent)
+            entries.append(entry)
+            parent = entry["id"]
+        self._commit(entries)
 
     def append(self, message: AgentMessage) -> str:
         """Add `message` as a child of the current leaf and move the leaf to it.
@@ -182,19 +185,29 @@ class SessionManager:
         Returns the new entry id. The pointer line is written after the entry so
         the entry is always on disk before it becomes the active branch.
         """
-        entry_id = new_id()
-        entry = {
-            "id": entry_id,
-            "parent": self.current_id,
+        entry = self._entry(message, self.current_id)
+        self._commit([entry])
+        return entry["id"]
+
+    @staticmethod
+    def _entry(message: AgentMessage, parent: str | None) -> dict:
+        """Build a session entry without changing the active branch."""
+        return {
+            "id": new_id(),
+            "parent": parent,
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "message": serialize_message(message),
         }
-        self.entries[entry_id] = entry
-        self.current_id = entry_id
+
+    def _commit(self, entries: list[dict]) -> None:
+        """Write entries and their final pointer before changing memory."""
         # `file` is None for an in-memory session, and stays None until
         # `new_session` picks one for a persisted one.
         if self.file is not None:
             with open(self.file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry) + "\n")
-                f.write(json.dumps({"current": entry_id}) + "\n")
-        return entry_id
+                for entry in entries:
+                    f.write(json.dumps(entry) + "\n")
+                f.write(json.dumps({"current": entries[-1]["id"]}) + "\n")
+        for entry in entries:
+            self.entries[entry["id"]] = entry
+        self.current_id = entries[-1]["id"]

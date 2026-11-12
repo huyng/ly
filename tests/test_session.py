@@ -1,6 +1,7 @@
 """Tests for session persistence: file layout of new sessions and the
 listing filter that keeps foreign session formats out of `/sessions`."""
 
+import builtins
 import json
 import os
 import re
@@ -187,3 +188,28 @@ def test_load_stops_at_dangling_current_pointer(tmp_path):
     restored = SessionManager(directory=tmp_path)
     restored.load(manager.file)
     assert restored.active_branch() == []
+
+
+def test_failed_append_leaves_memory_and_disk_on_the_old_leaf(tmp_path, monkeypatch):
+    manager = SessionManager(directory=tmp_path)
+    manager.new_session()
+    manager.append(UserMessage("kept"))
+    before = manager.active_branch()
+    entries = dict(manager.entries)
+    current_id = manager.current_id
+    assert manager.file is not None
+
+    def fail_write(*args, **kwargs):
+        raise OSError("disk full")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(builtins, "open", fail_write)
+        with pytest.raises(OSError, match="disk full"):
+            manager.append(UserMessage("not saved"))
+
+    assert manager.entries == entries
+    assert manager.current_id == current_id
+    assert manager.active_branch() == before
+    restored = SessionManager(directory=tmp_path)
+    restored.load(manager.file)
+    assert restored.active_branch() == before

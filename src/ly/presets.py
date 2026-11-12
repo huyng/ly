@@ -68,6 +68,16 @@ BUILT_IN: dict[str, Preset] = {
             "gpt-6-astra": Model(context_window=1_047_576),
         },
     ),
+    "moonshot": Preset(
+        base_url="https://api.moonshot.ai/v1",
+        key_env=("MOONSHOT_API_KEY",),
+        pass_reasoning_content=True,
+        models={
+            "kimi-k3.1-pro": Model(context_window=1_048_576),
+            "kimi-k3.1-pro-highspeed": Model(context_window=1_048_576),
+            "kimi-k3": Model(context_window=1_048_576)
+        },
+    ),
     "deepseek": Preset(
         base_url="https://api.deepseek.com",
         key_env=("DEEPSEEK_API_KEY",),

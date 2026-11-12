@@ -1,8 +1,10 @@
 """Tests for context compaction: splitting, session re-rooting, and the
 agent loop's threshold behavior."""
 
+import builtins
 import threading
 from typing import Any
+from unittest.mock import mock_open
 
 import pytest
 
@@ -281,6 +283,32 @@ def test_compact_reroots_the_branch_and_persists(tmp_path):
     assert [m.role for m in reloaded.active_branch()] == [m.role for m in branch]
     assert user_texts(reloaded.active_branch()) == user_texts(branch)
     assert len(reloaded.entries) > before  # old entries are still on disk
+
+
+def test_failed_compaction_keeps_the_old_active_branch(tmp_path, monkeypatch):
+    manager = SessionManager(directory=tmp_path)
+    manager.new_session()
+    build_history(manager, 3)
+    before = manager.active_branch()
+    entries = dict(manager.entries)
+    current_id = manager.current_id
+    assert manager.file is not None
+
+    # Fail on the second entry: an orphaned line is safe, but neither the
+    # in-memory tree nor the persisted pointer may move to a partial branch.
+    failing_file = mock_open()
+    failing_file.return_value.write.side_effect = [None, OSError("disk full")]
+    with monkeypatch.context() as patch:
+        patch.setattr(builtins, "open", failing_file)
+        with pytest.raises(OSError, match="disk full"):
+            manager.compact(UserMessage("summary"), before[-2:])
+
+    assert manager.entries == entries
+    assert manager.current_id == current_id
+    assert manager.active_branch() == before
+    restored = SessionManager(directory=tmp_path)
+    restored.load(manager.file)
+    assert restored.active_branch() == before
 
 
 # -- agent loop ----------------------------------------------------------------

@@ -1,16 +1,12 @@
 # lý
 
-**Lý** is a minimal AI coding agent for your terminal. Sandboxed in Docker by default,
-written in a few thousand lines of dependency-free Python.
+**Lý** is a minimal AI coding agent for your terminal. Sandboxed in Docker by default, written in a few thousand lines of dependency-free Python.
 
 - **Small on purpose.** No frameworks, no dependencies. One process,
   standard library only.
-- **Sandboxed by default.** ly transparently runs in a container with your project mounted, so it can only touch the project.
-- **Useful tools.** `read`, `grep`, `glob`, `edit`, `write` and `bash`, plus a
-  `subagent` that explores in its own context and reports back a summary.
-- **Immutable history** Conversation sessions are saved files
-- **Your endpoint.** OpenAI and DeepSeek are built in; any OpenAI-compatible
-  gateway is one entry in the settings file.
+- **Sandboxing built-in.** ly can run directly on your machine or as a sandboxed version of itself inside a docker container with your working automatically mounted in.
+- **Essential tool calls; no bloat.** `read`, `grep`, `glob`, `edit`, `write` and `bash`, plus a `subagent` that explores in its own context and reports back a summary.
+- **Immutable history.** Conversation sessions are saved as jsonl files in `~/.ly/sessions/` . All history is append-only and immutable.
 
 ## Install
 
@@ -36,7 +32,7 @@ ly "fix the failing tests"
 Or keep the model in `~/.ly/settings.json` instead of your shell:
 
 ```json
-{ "model": "deepseek/deepseek-chat" }
+{ "model": "deepseek/deepseek-flash" }
 ```
 
 Without a model, ly stops at startup and says how to set one, rather than
@@ -49,13 +45,13 @@ ly                                 # interactive session in this directory
 ly -p "what does this repo do?"    # print mode: answer to stdout, nothing else
 ly --resume 2                      # resume a recent session
 ly --sandbox python:3.12           # run in another Docker image
-ly --nosandbox                     #
+ly -ns                             # run in non-sandboxed mode
 ```
 
 Inside a session, Tab completes commands and model names:
 
 ```
-/model deepseek/deepseek-chat   switch model and provider mid-session
+/model deepseek/deepseek-flash   switch model and provider mid-session
 /help                           built-in and project commands
 /compact                        summarize old turns now
 /quit                           leave (also Ctrl-D)
@@ -80,7 +76,7 @@ variable beats it for one run:
 
 ```json
 {
-  "model": "deepseek/deepseek-chat",
+  "model": "deepseek/deepseek-flash",
   "sandbox": true,
   "thinking": true
 }

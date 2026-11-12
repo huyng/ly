@@ -157,12 +157,11 @@ class AgentSession:
         self._abort_event.clear()
         self._busy = True
         self._compaction_blocked = False
-        self._emit(AgentStartEvent())
-        self.session_manager.append(UserMessage(content=text))
-
         asst_message: AssistantMessage | None = None
         aborted = False
         try:
+            self._emit(AgentStartEvent())
+            self.session_manager.append(UserMessage(content=text))
             while True:
                 self._maybe_compact()
                 if self._abort_event.is_set():

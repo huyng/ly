@@ -592,6 +592,38 @@ def test_server_overload_is_retried(tmp_path, monkeypatch):
     assert session.usage.total_tokens == 45
 
 
+@pytest.mark.parametrize("failure", ["subscriber", "persistence"])
+def test_prompt_startup_failure_ends_the_run(failure, monkeypatch):
+    session = AgentSession(
+        backend=FakeBackend([]),
+        tools=[],
+        session_manager=SessionManager(),
+        system_prompt="test",
+    )
+    if failure == "persistence":
+
+        def fail_append(_message):
+            raise OSError("write failed")
+
+        monkeypatch.setattr(session.session_manager, "append", fail_append)
+    events = []
+    session.subscribe(events.append)
+    if failure == "subscriber":
+
+        def fail(event):
+            if isinstance(event, AgentStartEvent):
+                raise RuntimeError("callback failed")
+
+        session.subscribe(fail)
+
+    with pytest.raises(RuntimeError if failure == "subscriber" else OSError):
+        session.prompt("hi")
+
+    assert session.busy is False
+    assert isinstance(events[-1], AgentEndEvent)
+    assert events[-1].aborted is False
+
+
 @pytest.mark.parametrize("event_type", [TextDeltaEvent, MessageEndEvent])
 @pytest.mark.parametrize("error_type", [RuntimeError, ProviderError])
 def test_subscriber_failure_is_not_retried(event_type, error_type):

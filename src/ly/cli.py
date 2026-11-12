@@ -13,6 +13,7 @@ import os
 import re
 import readline
 import select
+import subprocess
 import sys
 import textwrap
 import time
@@ -90,6 +91,7 @@ HELP = """\
 /resume <n>        Resume the n-th session from /sessions
 /compact           Summarize old turns now (automatic near the limit)
 /<name> [args]     Run a command defined in .agents/commands (listed below)
+!<command>         Run a shell command here, outside the conversation
 /quit, /exit       Exit (also Ctrl-D)
 """
 
@@ -367,6 +369,9 @@ class Repl:
                 if self._command(line):
                     break
                 continue
+            if line.startswith("!"):
+                self._shell(line[1:].strip())
+                continue
 
             # Pick up a resize made while the prompt was being typed; the next
             # turn refreshes it again in _on_message_start.
@@ -374,6 +379,28 @@ class Repl:
             print()  # space the block off from what the user just typed
             self._print_prompt(line)
             self._submit(line)
+
+    def _shell(self, command: str) -> None:
+        """Run `command` as the user would in their own shell.
+
+        This is the user's keystroke, not a tool call: the child inherits the
+        terminal and the environment, so interactive commands work and nothing
+        is captured, truncated or handed to the model. Nothing is scrubbed
+        either — `tools/bash.py` hides credentials only because its output
+        enters the model's context, which this never does.
+
+        Args:
+            command: The text after `!`, already stripped; empty does nothing.
+        """
+        if not command:
+            return
+        try:
+            subprocess.run(command, shell=True, cwd=self.session.cwd)
+        except KeyboardInterrupt:
+            pass  # the child took the signal; the REPL must survive it
+        except OSError as exc:
+            print(self.theme.error(str(exc)))
+        print()
 
     def _print_prompt(self, text: str) -> None:
         """Echo a submitted prompt on a dark green band.

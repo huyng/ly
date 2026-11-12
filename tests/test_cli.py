@@ -464,6 +464,51 @@ def test_status_line_leaves_out_the_elapsed_time(capsys):
     assert "50 tok/s" in out  # the rate still needs the elapsed time
 
 
+# -- ! shell escape ----------------------------------------------------------
+
+
+def drive(repl, monkeypatch, *lines) -> None:
+    """Run the REPL over `lines`, then end input."""
+    pending = iter([*lines, None])
+    monkeypatch.setattr(repl, "_read", lambda prompt: next(pending))
+    repl.run()
+
+
+def test_bang_runs_the_command_without_asking_the_model(capsys, monkeypatch, tmp_path):
+    repl = make_repl()
+    repl.session.cwd = str(tmp_path)
+    before = len(repl.session.messages)
+
+    # ScriptedBackend raises if the provider is reached, so getting to the end
+    # at all proves `!` never became a prompt.
+    drive(repl, monkeypatch, "!printf 'shell output\\n'")
+
+    assert "shell output" in capsys.readouterr().out
+    assert len(repl.session.messages) == before
+
+
+def test_bang_runs_in_the_session_directory(capsys, monkeypatch, tmp_path):
+    repl = make_repl()
+    repl.session.cwd = str(tmp_path)
+
+    drive(repl, monkeypatch, "!pwd")
+
+    assert str(tmp_path) in capsys.readouterr().out
+
+
+def test_bang_keeps_a_failing_command_from_ending_the_session(
+    capsys, monkeypatch, tmp_path
+):
+    repl = make_repl()
+    repl.session.cwd = str(tmp_path)
+
+    # A non-zero exit is the user's business, not the REPL's; a bare `!` is a
+    # no-op rather than an error.
+    drive(repl, monkeypatch, "!exit 3", "!", "!echo still here")
+
+    assert "still here" in capsys.readouterr().out
+
+
 # -- environment variables: the CLI is the only place that reads them ---------
 
 

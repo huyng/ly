@@ -4,8 +4,8 @@
 
 - **Small on purpose.** No frameworks, no dependencies. One process,
   standard library only.
-- **Sandboxing built-in.** ly can run directly on your machine or as a sandboxed version of itself inside a docker container with your working automatically mounted in.
-- **Essential tool calls; no bloat.** `read`, `grep`, `glob`, `edit`, `write` and `bash`, plus a `subagent` that explores in its own context and reports back a summary.
+- **Sandboxing built-in.** ly can run directly on your machine or as a sandboxed version of itself inside a docker container with your working directory automatically mounted in.
+- **Just enough tools; no bloat.** `read`, `grep`, `glob`, `edit`, `write` and `bash`, plus a `subagent` that explores in its own context and reports back a summary.
 - **Immutable history.** Conversation sessions are saved as jsonl files in `~/.ly/sessions/` . All history is append-only and immutable.
 
 ## Install
@@ -23,13 +23,13 @@ python -m pip install git+https://github.com/huyng/ly
 
 ## Quick start
 
-Specify the LLM model you want to use by setting `LY_MODEL` to `provider/model-name` and the api-key with `LY_API_KEY`.
+Specify the LLM model you want to use by setting `LY_MODEL` to `provider/model-name` and the api-key with `LY_API_KEY`. The `provider` tag lets ly determine the base_url required to reach the various llm model providers that ly has builtin support for.
 
 ```bash
 export LY_MODEL=deepseek/deepseek-flash
 export LY_API_KEY=sk-
 
-ly "fix the failing tests"
+ly "read the files in this directory and tell me what needs improvement"
 ```
 
 Or keep the model in `~/.ly/settings.json` instead of your shell:

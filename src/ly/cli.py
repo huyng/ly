@@ -338,14 +338,14 @@ class Repl:
             f"{theme.bold('ly')} {theme.dim('v' + __version__)} {theme.dim('·')} "
             f"{theme.model(self.settings.model or 'no model')}"
         )
-        print(theme.dim(f"  • session {self.session.session_manager.file}"))
         if sandbox.in_container():
             # The container's own cwd is always /workspace, so name the host
             # directory too: that is the one the user can type in another shell.
             host = sandbox.host_dir()
             where = f"{host} → {self.session.cwd}" if host else self.session.cwd
-            detail = f"  • sandboxed docker {sandbox.image_name()} · {where}"
+            detail = f"  • SANDBOXED docker {sandbox.image_name()} · {where}"
             print(theme.dim(detail))
+        print(theme.dim(f"  • session {self.session.session_manager.file}"))
         for path, scope, _ in context_files(self.session.cwd):
             print(theme.dim(f"  • {scope.lower()} AGENTS.md {path}"))
 

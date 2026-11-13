@@ -678,10 +678,10 @@ class Repl:
             return
         # The wire format is baked into the backend class, so the backend is
         # replaced. The reader carries over, so a test's stand-in survives.
-        self.session.backend = make_backend(provider, self.session.backend.reader)
+        backend = make_backend(provider, self.session.backend.reader)
         # Compaction is sized by the new model's context window, so the old
         # numbers would compact at the wrong point: too late for a smaller one.
-        self.session.compaction = fresh.compaction
+        self.session.set_model(backend, fresh.compaction)
         self.settings = fresh
         if text not in self._models:
             self._models.append(text)

@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from ly.agent import AgentSession
+from ly.compaction import CompactionConfig
 from ly.events import (
     TaskActivityEvent,
     TextDeltaEvent,
@@ -188,15 +189,19 @@ def test_subagent_tool_set_is_read_only_and_non_recursive(workspace):
     assert {"edit", "write", "subagent"} <= set(parent_tools)
 
 
-def test_subagent_inherits_the_current_model(workspace):
-    session, backend = make_session(
-        workspace,
-        [task_call(prompt="look around"), reply("ok"), reply("done")],
+def test_subagent_inherits_the_current_backend(workspace):
+    session, backend = make_session(workspace, [])
+    replacement = ScriptedBackend(
+        [task_call(prompt="look around"), reply("sub report"), reply("done")]
     )
-    session.set_model("other-model")
+    replacement.provider.model = "other-model"
+    session.set_model(replacement, CompactionConfig())
+
     session.prompt("go")
 
-    assert backend.requests[1]["model"] == "other-model"
+    assert backend.requests == []
+    assert [request["model"] for request in replacement.requests] == ["other-model"] * 3
+    assert replacement.requests[1]["tools"] == ["read", "grep", "glob", "bash"]
 
 
 def test_subagent_sees_the_delegated_prompt_verbatim(workspace):

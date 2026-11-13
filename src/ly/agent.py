@@ -138,9 +138,21 @@ class AgentSession:
                 return message.text
         return ""
 
-    def set_model(self, model: str) -> None:
-        """Switch the model for subsequent requests; recorded history is untouched."""
-        self.backend.provider.model = model
+    def set_model(self, backend: ModelBackend, compaction: CompactionConfig) -> None:
+        """Use a resolved backend and its compaction configuration for later runs.
+
+        Args:
+            backend: The model, endpoint, credentials, and wire format to use.
+            compaction: Compaction settings sized for the new model.
+
+        Raises:
+            RuntimeError: A run is active, so one turn could otherwise use two
+                providers.
+        """
+        if self.busy:
+            raise RuntimeError("cannot switch models while a run is active")
+        self.backend = backend
+        self.compaction = compaction
 
     # -- prompting -------------------------------------------------------------
 

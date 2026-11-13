@@ -6,6 +6,7 @@ from typing import Any, ClassVar, cast
 import pytest
 
 from ly.agent import AgentSession
+from ly.compaction import CompactionConfig
 from ly.events import (
     AgentEndEvent,
     AgentStartEvent,
@@ -25,9 +26,12 @@ from ly.messages import (
     UserMessage,
 )
 from ly.providers import Provider, ProviderError, make_backend
-from ly.providers.backend import ModelBackend
+from ly.presets import Model, Preset
+from ly.providers.backend import ChatCompletionsBackend, ModelBackend, ResponsesBackend
+from ly.providers.errors import MissingCredentialsError, UnknownProviderError
 from ly.providers.sse import StreamReader
 from ly.session import SessionManager
+from ly.settings import Settings
 from ly.tools import Tool, ToolResult
 from ly.tools.task import SubAgentTool
 
@@ -494,6 +498,138 @@ def test_retry_starts_a_fresh_message(tmp_path, monkeypatch):
     assert backend.calls == 2
     assert final.text == "partial done"
     assert [type(e) for e in events].count(MessageStartEvent) == 2
+
+
+SDK_PRESETS = {
+    "openai": Preset(
+        base_url="https://openai.test/v1",
+        api_format="openai-responses",
+        models={"large": Model(context_window=200_000)},
+    ),
+    "deepseek": Preset(
+        base_url="https://deepseek.test",
+        pass_reasoning_content=True,
+        models={"small": Model(context_window=65_536, keep_turns=3)},
+    ),
+}
+
+
+def sdk_session(**overrides) -> AgentSession:
+    from ly import create_agent_session
+
+    return create_agent_session(
+        model="openai/large",
+        api_key="sk-openai",
+        persistent=False,
+        **overrides,
+    )
+
+
+def test_sdk_factory_sizes_compaction_and_honors_custom_tools(monkeypatch):
+    monkeypatch.setattr("ly.settings.BUILT_IN", SDK_PRESETS)
+    tool = EchoTool()
+
+    session = sdk_session(tools=[tool])
+    defaults = sdk_session()
+
+    assert session.compaction == CompactionConfig(
+        threshold_tokens=100_000, max_summary_input_tokens=100_000
+    )
+    assert session.tools == {"echo": tool}
+    assert "read" in defaults.tools
+    assert "echo" not in defaults.tools
+
+
+def test_sdk_switch_replaces_the_whole_model_runtime(monkeypatch):
+    monkeypatch.setattr("ly.settings.BUILT_IN", SDK_PRESETS)
+    session = sdk_session()
+    old_backend = session.backend
+    reader = old_backend.reader
+    session.session_manager.append(UserMessage("unchanged history"))
+    history = session.messages
+
+    settings = Settings.load(env={}, model="deepseek/small", api_key="sk-deepseek")
+    backend = make_backend(settings.make_provider(), old_backend.reader)
+    session.set_model(backend, settings.compaction)
+
+    provider = session.backend.provider
+    assert isinstance(old_backend, ResponsesBackend)
+    assert isinstance(session.backend, ChatCompletionsBackend)
+    assert session.backend.reader is reader
+    assert (
+        provider.model,
+        provider.base_url,
+        provider.api_key,
+        provider.api_format,
+        provider.pass_reasoning_content,
+    ) == (
+        "small",
+        "https://deepseek.test",
+        "sk-deepseek",
+        "openai-completions",
+        True,
+    )
+    assert session.compaction == CompactionConfig(
+        threshold_tokens=32_768, keep_turns=3, max_summary_input_tokens=32_768
+    )
+    assert session.messages == history
+
+
+def test_sdk_switch_honors_endpoint_and_wire_format_overrides(monkeypatch):
+    monkeypatch.setattr("ly.settings.BUILT_IN", SDK_PRESETS)
+    session = sdk_session()
+
+    settings = Settings.load(
+        env={},
+        model="deepseek/small",
+        api_key="sk-gateway",
+        base_url="https://gateway.test/v1",
+        api_format="openai-responses",
+    )
+    backend = make_backend(settings.make_provider(), session.backend.reader)
+    session.set_model(backend, settings.compaction)
+
+    provider = session.backend.provider
+    assert isinstance(session.backend, ResponsesBackend)
+    assert provider.base_url == "https://gateway.test/v1"
+    assert provider.api_key == "sk-gateway"
+
+
+@pytest.mark.parametrize("model", ["deepseek/small", "unknown/model"])
+def test_failed_sdk_switch_changes_nothing(model, monkeypatch):
+    monkeypatch.setattr("ly.settings.BUILT_IN", SDK_PRESETS)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "must-not-be-read")
+    session = sdk_session()
+    backend = session.backend
+    compaction = session.compaction
+    error = (
+        MissingCredentialsError if model == "deepseek/small" else UnknownProviderError
+    )
+
+    with pytest.raises(error):
+        settings = Settings.load(env={}, model=model)
+        session.set_model(make_backend(settings.make_provider()), settings.compaction)
+
+    assert session.backend is backend
+    assert session.compaction is compaction
+    assert backend.provider.api_key == "sk-openai"
+
+
+def test_model_switching_requires_an_idle_session():
+    session = AgentSession(
+        backend=FakeBackend([]),
+        tools=[],
+        session_manager=SessionManager(),
+        system_prompt="test",
+    )
+
+    backend = session.backend
+    compaction = session.compaction
+    session._busy = True
+    with pytest.raises(RuntimeError, match="run is active"):
+        session.set_model(backend, CompactionConfig())
+    assert session.backend is backend
+    assert session.compaction is compaction
 
 
 def test_create_agent_session_binds_tools_to_the_requested_cwd(tmp_path):

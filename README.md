@@ -132,7 +132,27 @@ print(session.last_assistant_text())
 session.dispose()
 ```
 
-Custom tools implement the `Tool` interface and go in the `tools` list:
+Switch provider and model between runs by resolving a new backend and passing
+its compaction settings. History stays intact; switching during an active run
+raises `RuntimeError`.
+
+```python
+from ly.providers import make_backend
+from ly.settings import Settings
+
+settings = Settings.load(
+    env={}, model="deepseek/deepseek-chat", api_key="sk-deepseek"
+)
+backend = make_backend(settings.make_provider(), session.backend.reader)
+session.set_model(backend, settings.compaction)
+```
+
+`Settings.load()` also accepts `base_url` and `api_format` overrides. Passing
+`env={}` keeps SDK configuration explicit instead of reading process variables.
+
+Custom tools implement the `Tool` interface and go in the `tools` list. Passing
+`tools` **replaces** the default coding tools; omit it to keep the defaults, or
+include every desired tool in your list:
 
 ```python
 from ly.tools import Tool, ToolResult

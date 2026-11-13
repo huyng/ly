@@ -51,9 +51,7 @@ def create_agent_session(
 
     # One resolution path: the reference names its endpoint, wire format and
     # key variable, so nothing here restates a default the CLI would not use.
-    # A caller that passes no model gets `MissingModelError` from
-    # `make_provider`, exactly as the CLI would, rather than a model nobody
-    # asked for.
+    # Empty env keeps the SDK configuration explicit.
     settings = Settings.load(
         env={},
         model=model,
@@ -61,7 +59,7 @@ def create_agent_session(
         api_key=api_key,
         api_format=api_format,
     )
-    provider = settings.make_provider()
+    backend = make_backend(settings.make_provider())
     # The SDK takes its configuration as arguments, so the default lives here
     # rather than in `SessionManager`, which holds no path of its own. Only the
     # CLI reads `LY_SESSIONS_DIR`, through `Settings`.
@@ -70,10 +68,11 @@ def create_agent_session(
         directory = Path(sessions_dir or DEFAULT_SESSIONS_DIR).expanduser()
     session_manager = SessionManager(directory)
     return AgentSession(
-        backend=make_backend(provider),
+        backend=backend,
         tools=tools if tools is not None else default_tools(cwd=cwd),
         session_manager=session_manager,
         system_prompt=build_system_prompt(cwd),
         cwd=cwd,
+        compaction=settings.compaction,
         tool_guard=tool_guard,
     )

@@ -253,7 +253,7 @@ def config_values(out: str) -> dict[str, str]:
 
 def test_config_shows_the_settings_in_effect(capsys):
     repl = make_repl(threshold_tokens=8000)
-    repl.session.set_model("switched-model")
+    repl.session.backend.provider.model = "switched-model"
     repl.show_thinking = False
 
     repl._command("/config")

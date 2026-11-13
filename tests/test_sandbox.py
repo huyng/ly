@@ -444,7 +444,9 @@ def test_every_presets_key_variable_is_carried(monkeypatch, tmp_path):
     with pytest.raises(SystemExit):
         main(["-p", "hello"])
 
-    assert handed_off == [("DEEPSEEK_API_KEY", "OPENAI_API_KEY")]
+    assert handed_off == [
+        ("DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "OPENAI_API_KEY", "ZAI_API_KEY")
+    ]
 
 
 def test_a_config_file_is_mounted_where_the_container_reads_it(tmp_path):

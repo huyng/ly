@@ -38,12 +38,12 @@ Or keep the model in `~/.ly/settings.json` instead of your shell:
 { "model": "deepseek/deepseek-flash" }
 ```
 
-
 ## Use
 
 ```bash
 ly                                 # interactive session in this directory
 ly -p "what does this repo do?"    # print mode: answer to stdout, nothing else
+cat error.log | ly -p "explain"    # print mode with the prompt piped on stdin
 ly --resume 2                      # resume a recent session
 ly --sandbox python:3.12           # run in another Docker image
 ly -ns                             # run in non-sandboxed mode
@@ -116,11 +116,13 @@ can live inside your own program.
 
 ```python
 from ly import create_agent_session
+from ly.events import TextDeltaEvent
 
 
 def handler(event):
-    # Events include text deltas, tool calls, and run lifecycle.
-    print(event.get("delta", ""), end="")
+    # Events are dataclasses: text deltas, tool calls, and run lifecycle.
+    if isinstance(event, TextDeltaEvent):
+        print(event.delta, end="", flush=True)
 
 
 session = create_agent_session(model="openai/gpt-4.1", api_key="sk-")

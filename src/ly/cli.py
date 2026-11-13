@@ -968,8 +968,12 @@ def main(argv: list[str] | None = None) -> None:
 
     try:
         if args.print:
+            if not args.prompt and not sys.stdin.isatty():
+                # A pipe is the prompt: `cat log | ly -p "explain"` avoids
+                # quoting a file's contents into argv. An argv prompt wins.
+                args.prompt = sys.stdin.read().strip()
             if not args.prompt:
-                sys.exit("-p requires a prompt")
+                sys.exit("-p requires a prompt (or pipe one on stdin)")
             print_mode(args, provider, settings.sessions_dir)
             return
 

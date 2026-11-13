@@ -75,7 +75,7 @@ BUILT_IN: dict[str, Preset] = {
         models={
             "kimi-k3.1-pro": Model(context_window=1_048_576),
             "kimi-k3.1-pro-highspeed": Model(context_window=1_048_576),
-            "kimi-k3": Model(context_window=1_048_576)
+            "kimi-k3": Model(context_window=1_048_576),
         },
     ),
     "deepseek": Preset(
@@ -85,6 +85,26 @@ BUILT_IN: dict[str, Preset] = {
         models={
             "deepseek-flash": Model(context_window=1_047_576, keep_turns=4),
             "deepseek-v4-pro": Model(context_window=1_047_576, keep_turns=4),
+        },
+    ),
+    "zai": Preset(
+        base_url="https://api.z.ai/api/paas/v4",
+        key_env=("ZAI_API_KEY",),
+        pass_reasoning_content=True,
+        models={
+            "glm-5.3": Model(context_window=1_000_000),
+            "glm-5.3-flash": Model(context_window=1_000_000),
+            "glm-5.2": Model(context_window=1_000_000),
+        },
+    ),
+    "zai-coding": Preset(
+        base_url="https://api.z.ai/api/coding/paas/v4",
+        key_env=("ZAI_API_KEY",),
+        pass_reasoning_content=True,
+        models={
+            "glm-5.3": Model(context_window=1_000_000),
+            "glm-5.3-flash": Model(context_window=1_000_000),
+            "glm-5.2": Model(context_window=1_000_000),
         },
     ),
 }

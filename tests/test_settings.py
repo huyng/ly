@@ -174,6 +174,25 @@ def test_pass_reasoning_content_comes_from_the_provider():
     ).pass_reasoning_content
 
 
+@pytest.mark.parametrize(
+    ("provider", "base_url"),
+    [
+        ("zai", "https://api.z.ai/api/paas/v4"),
+        ("zai-coding", "https://api.z.ai/api/coding/paas/v4"),
+    ],
+)
+def test_zai_presets(provider, base_url):
+    settings = Settings.load(
+        env={"LY_MODEL": f"{provider}/glm-5.3", "ZAI_API_KEY": "sk-zai"}
+    )
+
+    assert settings.base_url == base_url
+    assert settings.api_format == "openai-completions"
+    assert settings.api_key == "sk-zai"
+    assert settings.pass_reasoning_content
+    assert settings.context_window == 1_000_000
+
+
 def test_compaction_comes_from_the_file(tmp_path):
     path = write(
         tmp_path,
@@ -321,7 +340,12 @@ def test_the_preset_supplies_its_own_key_variable(tmp_path):
 
     assert settings.api_key == "sk-o"
     # Every preset's, because /model can switch provider inside the container.
-    assert settings.key_variables == ("DEEPSEEK_API_KEY", "OPENAI_API_KEY")
+    assert settings.key_variables == (
+        "DEEPSEEK_API_KEY",
+        "MOONSHOT_API_KEY",
+        "OPENAI_API_KEY",
+        "ZAI_API_KEY",
+    )
 
 
 def test_a_generic_key_wins_over_the_preset_variable(tmp_path):
@@ -587,7 +611,13 @@ def test_a_provider_entry_without_a_base_url_is_ignored(tmp_path):
         tmp_path, {"providers": {"broken": {"api_format": "openai-responses"}}}
     )
 
-    assert set(Settings.load(path, env={}).presets) == {"openai", "deepseek"}
+    assert set(Settings.load(path, env={}).presets) == {
+        "openai",
+        "deepseek",
+        "moonshot",
+        "zai",
+        "zai-coding",
+    }
 
 
 def test_a_missing_key_names_the_variable_the_provider_reads(tmp_path):

@@ -1,6 +1,7 @@
 """Tests for the REPL's status line: it must show the size of the next request,
 not just the cumulative token totals."""
 
+import io
 import json
 
 import pytest
@@ -580,6 +581,38 @@ def test_print_mode_says_it_is_in_docker_on_stderr(monkeypatch, capsys, tmp_path
     captured = capsys.readouterr()
     assert captured.err == "ly: docker example/image:1\n"
     assert captured.out == ""  # stdout stays clean for pipes
+
+
+def test_print_mode_reads_a_piped_prompt(monkeypatch):
+    """`cat log | ly -p "explain"`: the pipe is the prompt when argv has none."""
+    from ly.cli import main
+
+    monkeypatch.setenv("LY_MODEL", "openai/gpt-4.1")
+    monkeypatch.setenv("LY_API_KEY", "test")
+    monkeypatch.setattr("sys.stdin", io.StringIO("explain this\n"))
+    seen = {}
+
+    def capture(args, provider, directory):
+        seen["prompt"] = args.prompt
+
+    monkeypatch.setattr("ly.cli.print_mode", capture)
+
+    main(["-ns", "-p"])
+
+    assert seen["prompt"] == "explain this"
+
+
+def test_print_mode_still_requires_a_prompt(monkeypatch):
+    from ly.cli import main
+
+    monkeypatch.setenv("LY_MODEL", "openai/gpt-4.1")
+    monkeypatch.setenv("LY_API_KEY", "test")
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+
+    with pytest.raises(SystemExit) as exited:
+        main(["-ns", "-p"])
+
+    assert "pipe one on stdin" in str(exited.value)
 
 
 def test_no_provider_option_is_a_flag(monkeypatch):

@@ -10,21 +10,24 @@
 
 ## Install
 
-Requires Python 3.12+. Nothing is pulled in but the standard library.
+Requires Python 3.12+ (and Docker if you want to use sandboxing functionality) .
+
 
 ```bash
+# with uv
 uv tool install git+https://github.com/huyng/ly
+
+# or with pip
+python -m pip install git+https://github.com/huyng/ly
 ```
 
 ## Quick start
 
-A model is always written `provider/model`. The provider half names a preset
-that knows the endpoint and where its key lives, so the only thing you supply
-is the key. There is no default model: say which one you want once.
+Specify the LLM model you want to use by setting `LY_MODEL` to `provider/model-name` and the api-key with `LY_API_KEY`.
 
 ```bash
-export LY_MODEL=deepseek/deepseek-chat
-export DEEPSEEK_API_KEY=sk-       # or LY_API_KEY for either provider
+export LY_MODEL=deepseek/deepseek-flash
+export LY_API_KEY=sk-
 
 ly "fix the failing tests"
 ```
@@ -35,8 +38,6 @@ Or keep the model in `~/.ly/settings.json` instead of your shell:
 { "model": "deepseek/deepseek-flash" }
 ```
 
-Without a model, ly stops at startup and says how to set one, rather than
-picking an endpoint you did not ask for.
 
 ## Use
 
@@ -48,17 +49,16 @@ ly --sandbox python:3.12           # run in another Docker image
 ly -ns                             # run in non-sandboxed mode
 ```
 
-Inside a session, Tab completes commands and model names:
+Inside a session, you can access a variety of slash commands:
 
 ```
 /model deepseek/deepseek-flash   switch model and provider mid-session
-/help                           built-in and project commands
-/compact                        summarize old turns now
-/quit                           leave (also Ctrl-D)
+/help                            built-in and project commands
+/compact                         summarize old turns now
+/quit                            leave (also Ctrl-D)
 ```
 
-A line starting with `!` runs a shell command in place and leaves the
-conversation alone — the model never sees the command or its output:
+A line starting with `!` runs a shell command in place.
 
 ```
 !git status
@@ -71,8 +71,8 @@ type after the name.
 
 ## Configure
 
-`~/.ly/settings.json` holds what you would otherwise export, and an `LY_*`
-variable beats it for one run:
+
+`~/.ly/settings.json` holds what you would otherwise set via environment variables:
 
 ```json
 {
@@ -108,7 +108,7 @@ The default image carries git, make, gcc and curl. Point `--sandbox` at
 another image when you need more; it must have Python 3.12 or newer. podman
 works too, including rootless podman behind the `docker` shim.
 
-## Embedding ly
+## Agent SDK
 
 ly is also a library. `create_agent_session` takes its configuration as
 arguments — only the `ly` command reads `LY_*` variables — so the agent loop
@@ -131,24 +131,6 @@ unsubscribe()
 print(session.last_assistant_text())
 session.dispose()
 ```
-
-Switch provider and model between runs by resolving a new backend and passing
-its compaction settings. History stays intact; switching during an active run
-raises `RuntimeError`.
-
-```python
-from ly.providers import make_backend
-from ly.settings import Settings
-
-settings = Settings.load(
-    env={}, model="deepseek/deepseek-chat", api_key="sk-deepseek"
-)
-backend = make_backend(settings.make_provider(), session.backend.reader)
-session.set_model(backend, settings.compaction)
-```
-
-`Settings.load()` also accepts `base_url` and `api_format` overrides. Passing
-`env={}` keeps SDK configuration explicit instead of reading process variables.
 
 Custom tools implement the `Tool` interface and go in the `tools` list. Passing
 `tools` **replaces** the default coding tools; omit it to keep the defaults, or
